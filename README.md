@@ -66,7 +66,9 @@ Si `API_URL` en `config.js` está vacío, la página corre en **modo demo**: las
 1. Llena **Datos comunes** (contrato es obligatorio).
 2. Selecciona las fotos. Cada una se lee en segundos y muestra **Listo** o **Revisar**.
 3. Corrige lo que haga falta y toca **Guardar todas**.
-4. La pestaña **Mapa** muestra todas las fotos guardadas, con miniatura y enlace a Drive.
+4. La pestaña **Historial** lista todas las fotos guardadas (más recientes primero), con filtros por texto, contrato y fechas, descarga CSV y botón «Ver en el mapa».
+5. La pestaña **Mapa** muestra todas las fotos guardadas, coloreadas por momento (antes / durante / después), con foto, datos y enlace a Drive.
+6. Toca cualquier foto para verla completa.
 
 Orden de prioridad para la ubicación: **sello de la foto → GPS interno (EXIF) → manual**. Las fotos reenviadas por WhatsApp no traen GPS interno, por eso se lee el sello.
 

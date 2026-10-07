@@ -24,6 +24,7 @@
       </div>
       <nav class="tabs" role="tablist" aria-label="Secciones">
         <button class="tab is-active" role="tab" id="tab-cargar" aria-selected="true" aria-controls="vista-cargar">Cargar fotos</button>
+        <button class="tab" role="tab" id="tab-historial" aria-selected="false" aria-controls="vista-historial">Historial</button>
         <button class="tab" role="tab" id="tab-mapa" aria-selected="false" aria-controls="vista-mapa">Mapa</button>
       </nav>
     </div>
@@ -69,15 +70,44 @@
     </section>
   </main>
 
+  <!-- ===================== HISTORIAL ===================== -->
+  <main id="vista-historial" class="vista" role="tabpanel" aria-labelledby="tab-historial" hidden>
+    <section class="intro">
+      <h1>Historial de fotografías</h1>
+      <p>Todas las fotos guardadas, de la más reciente a la más antigua. Filtra por contrato, fecha o texto y descarga el resultado.</p>
+    </section>
+    <section class="panel filtros" aria-label="Filtros">
+      <div class="grid">
+        <label for="hist-buscar">Buscar<input id="hist-buscar" type="search" placeholder="Vía, municipio, ID, inspector…"></label>
+        <label for="hist-contrato">Contrato<select id="hist-contrato"><option value="">Todos los contratos</option></select></label>
+        <label for="hist-desde">Desde<input id="hist-desde" type="date"></label>
+        <label for="hist-hasta">Hasta<input id="hist-hasta" type="date"></label>
+      </div>
+      <div class="actions">
+        <button id="hist-recargar" type="button" class="btn btn--sm">Actualizar</button>
+        <button id="hist-csv" type="button" class="btn btn--sm">Descargar CSV</button>
+        <span class="hint" id="hist-conteo"></span>
+      </div>
+    </section>
+    <div id="hist-lista" class="hist"></div>
+  </main>
+
   <!-- ===================== MAPA ===================== -->
   <main id="vista-mapa" class="vista vista--mapa" role="tabpanel" aria-labelledby="tab-mapa" hidden>
     <div class="mapa-bar">
       <input id="filtro" type="search" placeholder="Filtrar por vía, contrato o municipio" aria-label="Filtrar">
+      <span class="leyenda"><span><i style="background:#e8a317"></i>Antes</span><span><i style="background:#2b7bd6"></i>Durante</span><span><i style="background:#2f9e57"></i>Después</span><span><i style="background:#7a847e"></i>Sin dato</span></span>
       <span class="hint" id="mapa-conteo"></span>
       <button id="recargar" type="button" class="btn btn--sm">Actualizar</button>
     </div>
     <div id="mapa" class="mapa" aria-label="Mapa de fotografías"></div>
   </main>
+
+  <!-- Visor de foto a tamaño completo -->
+  <dialog id="visor" class="visor" aria-label="Foto ampliada">
+    <div class="visor__bar"><span id="visor-nombre"></span><button type="button" id="visor-cerrar">Cerrar</button></div>
+    <img id="visor-img" alt="">
+  </dialog>
 
   <!-- Barra inferior de envío -->
   <div class="barra" id="barra">

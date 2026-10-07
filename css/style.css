@@ -76,10 +76,18 @@ input.is-invalid{border-color:var(--err)}
 .lista{display:grid;gap:12px}
 .tarjetas{display:grid;gap:14px}
 .vacio{color:var(--muted);text-align:center;padding:18px;border:1px dashed var(--line);border-radius:10px}
-.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;display:grid;grid-template-columns:200px 1fr;overflow:hidden}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;display:grid;grid-template-columns:minmax(240px,40%) 1fr;overflow:hidden}
 .card.is-guardado{opacity:.75}
-.card__foto{background:var(--line);min-height:150px}
-.card__foto img{width:100%;height:100%;object-fit:cover;display:block}
+.card__foto{align-self:start;background:#0e1210;display:flex;align-items:center;justify-content:center;border:0;padding:0;margin:0;cursor:zoom-in;position:relative;min-width:0}
+.card__foto img{width:100%;height:auto;max-height:100%;object-fit:contain;display:block}
+.card__foto span{position:absolute;right:8px;bottom:8px;font-size:12px;font-weight:600;background:rgba(0,0,0,.6);color:#fff;padding:3px 8px;border-radius:99px}
+.visor{border:0;padding:0;background:transparent;max-width:96vw;max-height:94vh}
+.visor::backdrop{background:rgba(0,0,0,.85)}
+.visor img{display:block;max-width:96vw;max-height:86vh;object-fit:contain;border-radius:4px}
+.visor__bar{display:flex;justify-content:space-between;gap:12px;align-items:center;color:#fff;padding:8px 2px;font-size:14px}
+.visor__bar button{background:#fff;color:#111;border:0;border-radius:6px;padding:6px 12px;font-weight:600;cursor:pointer}
+.leyenda{display:flex;gap:12px;flex-wrap:wrap;font-size:13px;color:var(--muted)}
+.leyenda i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:4px;vertical-align:-1px;border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.3)}
 .card__cuerpo{padding:14px;display:grid;gap:12px;min-width:0}
 .card__top{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;justify-content:space-between}
 .card__nombre{font:500 13px var(--f-mono);color:var(--muted);overflow-wrap:anywhere;min-width:0}
@@ -94,7 +102,7 @@ input.is-invalid{border-color:var(--err)}
 @media (prefers-reduced-motion:no-preference){.chip--leyendo,.chip--guardando{animation:pulso 1.2s ease-in-out infinite}@keyframes pulso{50%{opacity:.4}}}
 
 /* ---------- Mapa ---------- */
-.vista--mapa{max-width:none;padding:0;gap:0;height:calc(100vh - 56px);height:calc(100dvh - 56px);grid-template-rows:auto 1fr}
+.vista--mapa{max-width:none;padding:0;gap:0;height:calc(100vh - var(--top-h,96px));height:calc(100dvh - var(--top-h,96px));grid-template-rows:auto 1fr}
 .mapa-bar{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;padding:10px 16px;background:var(--surface);border-bottom:1px solid var(--line)}
 .mapa-bar input{flex:1;min-width:200px}
 .mapa{min-height:360px}
@@ -111,6 +119,27 @@ input.is-invalid{border-color:var(--err)}
 
 @media (max-width:600px){
   .card{grid-template-columns:1fr}
-  .card__foto{aspect-ratio:16/9;min-height:0}
+  .card__foto{min-height:0}
   .brand__name{font-size:19px}
+}
+
+/* ---------- Historial ---------- */
+.filtros .actions{align-items:center}
+.hist{display:grid;gap:10px}
+.hrow{background:var(--surface);border:1px solid var(--line);border-radius:10px;display:grid;grid-template-columns:160px 1fr;overflow:hidden}
+.hrow__foto{align-self:start;background:#0e1210;color:#9aa79e;font-size:13px;border:0;padding:0;cursor:zoom-in;display:flex;align-items:center;justify-content:center;min-height:100px}
+.hrow__foto img{width:100%;height:auto;display:block}
+.hrow__info{padding:12px 14px;display:grid;gap:4px;min-width:0}
+.hrow__top{display:flex;gap:8px;justify-content:space-between;align-items:baseline;flex-wrap:wrap}
+.hrow__top b{font:700 18px var(--f-display);letter-spacing:.02em}
+.hrow__id{font:500 13px var(--f-mono);color:var(--muted)}
+.hrow__meta{font-size:14px;color:var(--muted)}
+.hrow__obs{font-size:14px}
+.hrow__acc{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;align-items:center}
+.hrow__acc a.btn{text-decoration:none;display:inline-block}
+.tabs{flex-wrap:wrap}
+@media (max-width:600px){
+  .hrow{grid-template-columns:1fr}
+  .topbar__in{padding-block:8px}
+  .tab{padding:7px 10px}
 }

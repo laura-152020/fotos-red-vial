@@ -63,7 +63,7 @@
       }
       if (accion === "subir") {
         const id = "F-" + String(this.guardados.length + 1).padStart(6, "0");
-        this.guardados.push({ ID: id, FechaFoto: d.fecha, Latitud: d.latitud, Longitud: d.longitud, Via: d.via, Municipio: d.municipio, Contrato: d.contrato, TipoActividad: d.tipoActividad, Momento: d.momento, FileId: "" });
+        this.guardados.push({ ID: id, FechaFoto: d.fecha, Latitud: d.latitud, Longitud: d.longitud, Via: d.via, Municipio: d.municipio, Contrato: d.contrato, TipoActividad: d.tipoActividad, Momento: d.momento, Observaciones: d.observacion, FileId: "" });
         return { status: "success", id };
       }
       return { status: "error", message: "Acción no reconocida." };
@@ -214,7 +214,7 @@
     const alerta = fuera(it.latitud, it.longitud) ? '<div class="alerta">La ubicación cae fuera de Antioquia. Verifica las coordenadas.</div>' : "";
     const msg = it.mensaje ? `<div class="alerta">${esc(it.mensaje)}</div>` : "";
     return `<article class="card${it.estado === "guardado" ? " is-guardado" : ""}" data-id="${it.id}">
-      <div class="card__foto"><img src="${it.miniatura}" alt="Foto ${esc(it.nombreArchivo)}"></div>
+      <button type="button" class="card__foto" data-act="ver" aria-label="Ver foto completa"><img src="${it.miniatura}" alt="Foto ${esc(it.nombreArchivo)}"><span>Ampliar</span></button>
       <div class="card__cuerpo">
         <div class="card__top"><span class="card__nombre">${esc(it.nombreArchivo)}${it.idRegistro ? " · " + esc(it.idRegistro) : ""}</span><span class="chip chip--${it.estado}">${ETIQUETAS[it.estado]}</span></div>
         ${msg}
@@ -237,6 +237,7 @@
         </fieldset>
         <div class="actions">
           ${it.estado !== "guardado" && it.estado !== "leyendo" ? '<button type="button" class="btn btn--sm" data-act="releer">Volver a leer sello</button>' : ""}
+          ${it.estado === "guardado" && tieneCoord(it) ? '<button type="button" class="btn btn--sm" data-act="mapa">Ver en el mapa</button>' : ""}
           ${it.estado !== "guardando" ? '<button type="button" class="btn btn--sm" data-act="quitar">Quitar de la lista</button>' : ""}
         </div>
       </div>
@@ -284,6 +285,8 @@
     const it = buscar(b); if (!it) return;
     if (b.dataset.act === "quitar") { items = items.filter((x) => x !== it); render(); }
     if (b.dataset.act === "releer") { cola.push(it); it.estado = "leyendo"; actualizar(it); procesarCola(); }
+    if (b.dataset.act === "ver") abrirVisor("data:image/jpeg;base64," + it.base64, it.nombreArchivo);
+    if (b.dataset.act === "mapa") { enfocarId = it.idRegistro; mostrar("mapa"); }
   });
 
   /* ======================= Guardar ======================= */
@@ -314,7 +317,7 @@
         frente: it.frente, tipoActividad: it.tipoActividad, momento: it.momento, observacion: it.observacion,
         inspector: it.inspector, origenUbicacion: it.origenUbicacion, selloLegible: it.selloLegible
       });
-      if (r.status === "success") { it.estado = "guardado"; it.idRegistro = r.id; it.mensaje = ""; ok++; }
+      if (r.status === "success") { it.estado = "guardado"; it.idRegistro = r.id; it.mensaje = ""; ok++; if (r.id) fotosLocales[r.id] = it.miniatura; }
       else { it.estado = "error"; it.mensaje = r.message || "No se pudo guardar."; mal++; }
       actualizar(it);
     }
@@ -340,63 +343,200 @@
   drop.addEventListener("drop", (e) => { if (e.dataTransfer?.files?.length) agregar([...e.dataTransfer.files]); });
 
   /* ======================= Mapa ======================= */
-  let mapa = null, grupo = null, registros = [], mapaDesactualizado = true;
+  let mapa = null, grupo = null, registros = [], mapaDesactualizado = true, enfocarId = null;
+  const fotosLocales = {}; // ID → miniatura de fotos guardadas en esta sesión
+  const marcadores = {};
+  const COLORES = { "Antes": "#e8a317", "Durante": "#2b7bd6", "Después": "#2f9e57" };
 
   function iniciarMapa() {
-    if (mapa || !window.L) return;
-    mapa = L.map("mapa", { zoomControl: true }).setView(CONFIG.MAPA_CENTRO, CONFIG.MAPA_ZOOM);
+    if (mapa) return true;
+    if (!window.L) { $("#mapa-conteo").textContent = "No cargó la librería del mapa. Revisa la conexión y recarga la página."; return false; }
+    mapa = L.map("mapa", { zoomControl: true, preferCanvas: false }).setView(CONFIG.MAPA_CENTRO, CONFIG.MAPA_ZOOM);
     const satelite = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", { maxZoom: 19, attribution: "Imágenes © Esri" });
     const calles = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" });
     const etiquetas = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}", { maxZoom: 19 });
     satelite.addTo(mapa); etiquetas.addTo(mapa);
     L.control.layers({ "Satélite": satelite, "Calles": calles }, { "Nombres": etiquetas }).addTo(mapa);
-    grupo = L.markerClusterGroup ? L.markerClusterGroup() : L.layerGroup();
+    L.control.scale({ imperial: false }).addTo(mapa);
+    grupo = L.markerClusterGroup ? L.markerClusterGroup({ showCoverageOnHover: false, maxClusterRadius: 40, disableClusteringAtZoom: 16 }) : L.featureGroup();
     mapa.addLayer(grupo);
+    return true;
   }
 
-  async function cargarMapa() {
-    iniciarMapa();
+  function urlFoto(x) {
+    if (fotosLocales[x.ID]) return fotosLocales[x.ID];
+    if (x.FileId) return "https://lh3.googleusercontent.com/d/" + encodeURIComponent(x.FileId) + "=w600";
+    return "";
+  }
+
+  let todos = [], cargando = null;
+  async function cargarRegistros(forzar) {
+    if (cargando) return cargando;
+    if (!forzar && !mapaDesactualizado) return { status: "success" };
+    cargando = (async () => {
+      const r = await Api.listar();
+      if (r.status === "success") {
+        todos = (r.registros || []).slice().reverse(); // más recientes primero
+        registros = todos.filter((x) => x.Latitud !== "" && x.Longitud !== "" && !isNaN(Number(x.Latitud)) && !isNaN(Number(x.Longitud)));
+        mapaDesactualizado = false;
+      }
+      return r;
+    })();
+    try { return await cargando; } finally { cargando = null; }
+  }
+
+  async function cargarMapa(forzar) {
+    if (!iniciarMapa()) return;
     $("#mapa-conteo").textContent = "Cargando…";
-    const r = await Api.listar();
+    const r = await cargarRegistros(forzar);
     if (r.status !== "success") { $("#mapa-conteo").textContent = r.message || "Error al cargar."; return; }
-    registros = (r.registros || []).filter((x) => x.Latitud !== "" && x.Longitud !== "" && !isNaN(Number(x.Latitud)));
-    mapaDesactualizado = false;
-    pintar();
+    pintar(true);
   }
 
-  function pintar() {
+  function popup(x) {
+    const src = urlFoto(x);
+    const alt = x.FileId ? "https://drive.google.com/thumbnail?id=" + encodeURIComponent(x.FileId) + "&sz=w600" : "";
+    const img = src ? `<img src="${esc(src)}" alt="Foto ${esc(x.ID)}" data-full="${esc(src)}" data-alt="${esc(alt)}" onerror="if(this.dataset.alt&&this.src!==this.dataset.alt){this.src=this.dataset.alt}else{this.remove()}" style="cursor:zoom-in">` : "";
+    const enlace = x.URL ? `<a href="${esc(x.URL)}" target="_blank" rel="noopener">Abrir original en Drive</a>` : "";
+    return `<div class="pop">${img}<b>${esc(x.Via || "Sin vía")}</b>` +
+      `<small>${esc(x.ID)} · ${esc(x.FechaFoto || "")}${x.Municipio ? " · " + esc(x.Municipio) : ""}</small>` +
+      `<small>Contrato ${esc(x.Contrato || "—")}${x.TipoActividad ? " · " + esc(x.TipoActividad) : ""}${x.Momento ? " (" + esc(x.Momento) + ")" : ""}</small>` +
+      (x.Observaciones ? `<small>${esc(x.Observaciones)}</small>` : "") + enlace + `</div>`;
+  }
+
+  function pintar(ajustar) {
     if (!grupo) return;
     const q = $("#filtro").value.trim().toLowerCase();
-    const vis = registros.filter((x) => !q || [x.Via, x.Contrato, x.Municipio, x.ID].join(" ").toLowerCase().includes(q));
+    const vis = registros.filter((x) => !q || [x.Via, x.Contrato, x.Municipio, x.ID, x.TipoActividad].join(" ").toLowerCase().includes(q));
     grupo.clearLayers();
+    for (const k in marcadores) delete marcadores[k];
     vis.forEach((x) => {
-      const img = x.FileId ? `<img src="https://drive.google.com/thumbnail?id=${encodeURIComponent(x.FileId)}&sz=w480" alt="Foto ${esc(x.ID)}" loading="lazy">` : "";
-      const enlace = x.URL ? `<a href="${esc(x.URL)}" target="_blank" rel="noopener">Abrir foto en Drive</a>` : "";
-      L.marker([Number(x.Latitud), Number(x.Longitud)]).bindPopup(
-        `<div class="pop">${img}<b>${esc(x.Via || "Sin vía")}</b><small>${esc(x.ID)} · ${esc(x.FechaFoto || "")} · ${esc(x.Municipio || "")}</small>` +
-        `<small>Contrato ${esc(x.Contrato || "—")} · ${esc(x.TipoActividad || "")} ${x.Momento ? "(" + esc(x.Momento) + ")" : ""}</small>${enlace}</div>`,
-        { maxWidth: 280 }
-      ).addTo(grupo);
+      const m = L.circleMarker([Number(x.Latitud), Number(x.Longitud)], {
+        radius: 9, weight: 3, color: "#ffffff", fillColor: COLORES[x.Momento] || "#7a847e", fillOpacity: 1
+      }).bindPopup(popup(x), { maxWidth: 300, minWidth: 220 });
+      marcadores[x.ID] = m;
+      m.addTo(grupo);
     });
-    $("#mapa-conteo").textContent = `${vis.length} de ${registros.length} fotos`;
-    if (vis.length) mapa.fitBounds(L.latLngBounds(vis.map((x) => [Number(x.Latitud), Number(x.Longitud)])).pad(0.2), { maxZoom: 15 });
-  }
-  $("#filtro").addEventListener("input", pintar);
-  $("#recargar").addEventListener("click", cargarMapa);
-
-  /* ======================= Pestañas ======================= */
-  function mostrar(vista) {
-    const esMapa = vista === "mapa";
-    $("#vista-cargar").hidden = esMapa; $("#vista-mapa").hidden = !esMapa; $("#barra").hidden = esMapa;
-    $("#tab-cargar").classList.toggle("is-active", !esMapa); $("#tab-mapa").classList.toggle("is-active", esMapa);
-    $("#tab-cargar").setAttribute("aria-selected", String(!esMapa)); $("#tab-mapa").setAttribute("aria-selected", String(esMapa));
-    if (esMapa) {
-      if (mapaDesactualizado) cargarMapa();
-      setTimeout(() => mapa && mapa.invalidateSize(), 50);
+    $("#mapa-conteo").textContent = registros.length ? `${vis.length} de ${registros.length} fotos` : "Aún no hay fotos guardadas con coordenadas.";
+    if (enfocarId && marcadores[enfocarId]) {
+      const m = marcadores[enfocarId]; enfocarId = null;
+      mapa.setView(m.getLatLng(), 17, { animate: false });
+      setTimeout(() => m.openPopup(), 250);
+    } else if (ajustar && vis.length) {
+      mapa.fitBounds(L.latLngBounds(vis.map((x) => [Number(x.Latitud), Number(x.Longitud)])).pad(0.2), { maxZoom: 15 });
     }
   }
-  $("#tab-cargar").addEventListener("click", () => mostrar("cargar"));
-  $("#tab-mapa").addEventListener("click", () => mostrar("mapa"));
+  $("#filtro").addEventListener("input", () => pintar(true));
+  $("#recargar").addEventListener("click", () => cargarMapa(true));
+  $("#mapa").addEventListener("click", (e) => {
+    const img = e.target.closest(".pop img");
+    if (img) abrirVisor(img.currentSrc || img.src, img.alt);
+  });
+
+  /* ======================= Visor de foto ======================= */
+  const visor = $("#visor");
+  function abrirVisor(src, nombre) {
+    $("#visor-img").src = src; $("#visor-img").alt = nombre || "Foto";
+    $("#visor-nombre").textContent = nombre || "";
+    if (visor.showModal) visor.showModal(); else window.open(src, "_blank");
+  }
+  $("#visor-cerrar").addEventListener("click", () => visor.close());
+  visor.addEventListener("click", (e) => { if (e.target === visor) visor.close(); });
+
+  /* ======================= Historial ======================= */
+  async function cargarHistorial(forzar) {
+    $("#hist-conteo").textContent = "Cargando…";
+    const r = await cargarRegistros(forzar);
+    if (r.status !== "success") { $("#hist-conteo").textContent = r.message || "Error al cargar."; $("#hist-lista").innerHTML = ""; return; }
+    poblarFiltros();
+    pintarHistorial();
+  }
+
+  function poblarFiltros() {
+    const sel = $("#hist-contrato"), actual = sel.value;
+    const contratos = [...new Set(todos.map((x) => String(x.Contrato || "").trim()).filter(Boolean))].sort();
+    sel.innerHTML = '<option value="">Todos los contratos</option>' + contratos.map((c) => `<option${c === actual ? " selected" : ""}>${esc(c)}</option>`).join("");
+  }
+
+  function filtrados() {
+    const q = $("#hist-buscar").value.trim().toLowerCase();
+    const c = $("#hist-contrato").value;
+    const d = $("#hist-desde").value, h = $("#hist-hasta").value;
+    return todos.filter((x) => {
+      if (c && String(x.Contrato).trim() !== c) return false;
+      const f = String(x.FechaFoto || x.FechaRegistro || "").slice(0, 10);
+      if (d && f && f < d) return false;
+      if (h && f && f > h) return false;
+      return !q || [x.ID, x.Via, x.Municipio, x.Contrato, x.Frente, x.TipoActividad, x.Inspector, x.Observaciones].join(" ").toLowerCase().includes(q);
+    });
+  }
+
+  function pintarHistorial() {
+    const lista = filtrados();
+    $("#hist-conteo").textContent = todos.length ? `${lista.length} de ${todos.length} fotos guardadas` : "";
+    if (!todos.length) { $("#hist-lista").innerHTML = '<p class="vacio">Todavía no hay fotos guardadas. Las que guardes en «Cargar fotos» aparecen aquí.</p>'; return; }
+    if (!lista.length) { $("#hist-lista").innerHTML = '<p class="vacio">Ninguna foto coincide con el filtro.</p>'; return; }
+    $("#hist-lista").innerHTML = lista.map((x) => {
+      const src = urlFoto(x);
+      const alt = x.FileId ? "https://drive.google.com/thumbnail?id=" + encodeURIComponent(x.FileId) + "&sz=w400" : "";
+      const coord = x.Latitud !== "" && x.Longitud !== "" && !isNaN(Number(x.Latitud));
+      return `<article class="hrow" data-id="${esc(x.ID)}">
+        <button type="button" class="hrow__foto" data-hact="ver" aria-label="Ver foto ${esc(x.ID)}">${src ? `<img src="${esc(src)}" data-alt="${esc(alt)}" alt="" loading="lazy" onerror="if(this.dataset.alt&&this.src!==this.dataset.alt){this.src=this.dataset.alt}else{this.replaceWith('Sin vista previa')}">` : "Sin foto"}</button>
+        <div class="hrow__info">
+          <div class="hrow__top"><b>${esc(x.Via || "Sin vía")}</b><span class="hrow__id">${esc(x.ID)}</span></div>
+          <div class="hrow__meta">${esc(x.FechaFoto || "Sin fecha")} · ${esc(x.Municipio || "Sin municipio")} · Contrato ${esc(x.Contrato || "—")}${x.Frente ? " · " + esc(x.Frente) : ""}</div>
+          <div class="hrow__meta">${[x.TipoActividad, x.Momento, x.Inspector].filter(Boolean).map(esc).join(" · ")}</div>
+          ${x.Observaciones ? `<div class="hrow__obs">${esc(x.Observaciones)}</div>` : ""}
+          <div class="hrow__acc">
+            ${coord ? '<button type="button" class="btn btn--sm" data-hact="mapa">Ver en el mapa</button>' : '<span class="alerta">Sin coordenadas</span>'}
+            ${x.URL ? `<a class="btn btn--sm" href="${esc(x.URL)}" target="_blank" rel="noopener">Abrir en Drive</a>` : ""}
+          </div>
+        </div>
+      </article>`;
+    }).join("");
+  }
+
+  ["#hist-buscar", "#hist-contrato", "#hist-desde", "#hist-hasta"].forEach((id) => $(id).addEventListener("input", pintarHistorial));
+  $("#hist-recargar").addEventListener("click", () => cargarHistorial(true));
+  $("#hist-lista").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-hact]"); if (!b) return;
+    const x = todos.find((r) => r.ID === b.closest(".hrow").dataset.id); if (!x) return;
+    if (b.dataset.hact === "mapa") { enfocarId = x.ID; mostrar("mapa"); }
+    if (b.dataset.hact === "ver") { const img = b.querySelector("img"); if (img) abrirVisor(x.FileId && !fotosLocales[x.ID] ? "https://lh3.googleusercontent.com/d/" + encodeURIComponent(x.FileId) + "=w2000" : img.src, x.ID + " · " + (x.Via || "")); }
+  });
+  $("#hist-csv").addEventListener("click", () => {
+    const lista = filtrados();
+    if (!lista.length) return;
+    const cols = ["ID", "FechaRegistro", "FechaFoto", "Latitud", "Longitud", "Via", "Municipio", "Contrato", "Frente", "TipoActividad", "Momento", "Observaciones", "Inspector", "Archivo", "URL"];
+    const q = (v) => { v = v == null ? "" : String(v); return /[",;\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+    const csv = "﻿" + cols.join(",") + "\n" + lista.map((x) => cols.map((c) => q(x[c])).join(",")).join("\n");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    a.download = "historial_fotos_red_vial_" + new Date().toISOString().slice(0, 10) + ".csv";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  });
+
+  /* ======================= Pestañas ======================= */
+  const VISTAS = ["cargar", "historial", "mapa"];
+  function mostrar(vista) {
+    VISTAS.forEach((v) => {
+      const activa = v === vista;
+      $("#vista-" + v).hidden = !activa;
+      $("#tab-" + v).classList.toggle("is-active", activa);
+      $("#tab-" + v).setAttribute("aria-selected", String(activa));
+    });
+    $("#barra").hidden = vista !== "cargar";
+    window.scrollTo(0, 0);
+    document.documentElement.style.setProperty("--top-h", $(".topbar").offsetHeight + "px");
+    if (vista === "mapa") {
+      if (mapaDesactualizado || !grupo) cargarMapa(); else pintar(!enfocarId);
+      setTimeout(() => mapa && mapa.invalidateSize(), 60);
+    }
+    if (vista === "historial") cargarHistorial();
+  }
+  VISTAS.forEach((v) => $("#tab-" + v).addEventListener("click", () => mostrar(v)));
+  window.addEventListener("resize", () => document.documentElement.style.setProperty("--top-h", $(".topbar").offsetHeight + "px"));
 
   /* ======================= Inicio ======================= */
   $("#demo-banner").hidden = !DEMO;
