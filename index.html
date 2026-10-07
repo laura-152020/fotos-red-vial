@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Fotos Red Vial Antioquia</title>
+  <meta name="description" content="Carga e inventario fotográfico de la red vial — Secretaría de Infraestructura Física de Antioquia">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar__in">
+      <div class="brand">
+        <span class="brand__mark" aria-hidden="true"></span>
+        <div>
+          <div class="brand__eyebrow">Secretaría de Infraestructura Física</div>
+          <div class="brand__name">Fotos Red Vial Antioquia</div>
+        </div>
+      </div>
+      <nav class="tabs" role="tablist" aria-label="Secciones">
+        <button class="tab is-active" role="tab" id="tab-cargar" aria-selected="true" aria-controls="vista-cargar">Cargar fotos</button>
+        <button class="tab" role="tab" id="tab-mapa" aria-selected="false" aria-controls="vista-mapa">Mapa</button>
+      </nav>
+    </div>
+    <div id="demo-banner" class="demo" hidden>Modo demo: no hay backend configurado. Las lecturas son simuladas y nada se guarda.</div>
+  </header>
+
+  <!-- ===================== CARGAR ===================== -->
+  <main id="vista-cargar" class="vista" role="tabpanel" aria-labelledby="tab-cargar">
+    <section class="intro">
+      <h1>Carga e inventario fotográfico</h1>
+      <p>Sube las fotos de inspección. Se lee el sello de cada foto (fecha, coordenadas y vía), revisas los datos y guardas. Las fotos quedan en Drive, los datos en la base y los puntos en el mapa.</p>
+    </section>
+
+    <section class="panel" aria-labelledby="h-comun">
+      <div class="panel__head">
+        <h2 id="h-comun">Datos comunes</h2>
+        <span class="hint">Se aplican a cada foto nueva</span>
+      </div>
+      <div class="grid">
+        <label for="c-contrato"><span>Contrato <em>*</em></span><input id="c-contrato" autocomplete="off" placeholder="Ej. 4600012345"></label>
+        <label for="c-frente">Frente<input id="c-frente" autocomplete="off" placeholder="Ej. Frente 2"></label>
+        <label for="c-municipio">Municipio<input id="c-municipio" autocomplete="off" placeholder="Vacío = se sugiere"></label>
+        <label for="c-inspector">Inspector<input id="c-inspector" autocomplete="name" placeholder="Quién reporta"></label>
+      </div>
+      <div class="actions"><button id="aplicar-todas" type="button" class="btn">Aplicar a todas las fotos</button></div>
+    </section>
+
+    <label class="drop" id="drop" for="archivos">
+      <span class="drop__icon" aria-hidden="true"></span>
+      <strong>Seleccionar fotografías</strong>
+      <small>Toca para elegir en el celular o arrastra aquí en el computador · JPG, PNG, WEBP hasta 20 MB</small>
+      <input id="archivos" type="file" accept="image/jpeg,image/png,image/webp" multiple>
+    </label>
+
+    <div id="aviso" class="aviso" role="status" hidden></div>
+
+    <section aria-labelledby="h-fotos" class="lista">
+      <div class="panel__head">
+        <h2 id="h-fotos">Fotos</h2>
+        <span class="hint" id="resumen"></span>
+      </div>
+      <div id="tarjetas" class="tarjetas"></div>
+    </section>
+  </main>
+
+  <!-- ===================== MAPA ===================== -->
+  <main id="vista-mapa" class="vista vista--mapa" role="tabpanel" aria-labelledby="tab-mapa" hidden>
+    <div class="mapa-bar">
+      <input id="filtro" type="search" placeholder="Filtrar por vía, contrato o municipio" aria-label="Filtrar">
+      <span class="hint" id="mapa-conteo"></span>
+      <button id="recargar" type="button" class="btn btn--sm">Actualizar</button>
+    </div>
+    <div id="mapa" class="mapa" aria-label="Mapa de fotografías"></div>
+  </main>
+
+  <!-- Barra inferior de envío -->
+  <div class="barra" id="barra">
+    <div class="barra__in">
+      <div class="barra__cuenta"><b id="n-listas">0</b> listas para guardar <span id="n-leyendo"></span></div>
+      <button id="vaciar" type="button" class="btn">Vaciar</button>
+      <button id="guardar" type="button" class="btn btn--primary" disabled>Guardar todas</button>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/exifr@7.1.3/dist/lite.umd.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

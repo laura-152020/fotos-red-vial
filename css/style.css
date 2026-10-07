@@ -1,0 +1,116 @@
+/* Fotos Red Vial Antioquia — v2
+   Layout: barra superior con pestañas · columna única tipo planilla de campo · barra fija de envío abajo */
+:root{
+  --bg:#f3f4f1; --surface:#ffffff; --line:#d9ddd6; --ink:#1c241f; --muted:#5e6a62;
+  --brand:#1f6b3d; --brand-ink:#ffffff; --sign:#e8a317; --sign-soft:#fbf0d6;
+  --ok:#2f7d4a; --warn:#a86500; --err:#b3261e; --field:#fafbf9;
+  --f-display:"Barlow Condensed","Arial Narrow",system-ui,sans-serif;
+  --f-body:"Barlow",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#131815; --surface:#1b221e; --line:#2f3a33; --ink:#e6ebe7; --muted:#9aa79e;
+  --brand:#3f9c62; --brand-ink:#0d130f; --sign:#f0b43a; --sign-soft:#3a2f17;
+  --ok:#5cbf7d; --warn:#f0b43a; --err:#ff8a80; --field:#161c19; color-scheme:dark}}
+
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:16px/1.45 var(--f-body);-webkit-text-size-adjust:100%}
+img{max-width:100%}
+[hidden]{display:none!important}
+button,input,select,textarea{font:inherit;color:inherit}
+
+/* ---------- Barra superior ---------- */
+.topbar{position:sticky;top:0;z-index:1000;background:var(--brand);color:var(--brand-ink);padding-top:env(safe-area-inset-top,0px)}
+.topbar__in{max-width:960px;margin:0 auto;padding:10px 16px;display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;justify-content:space-between}
+.brand{display:flex;gap:10px;align-items:center;min-width:0}
+.brand__mark{width:30px;height:30px;border-radius:6px;background:var(--sign);flex:none;
+  background-image:linear-gradient(90deg,transparent 45%,var(--brand) 45% 55%,transparent 55%);
+  background-size:100% 8px;background-repeat:repeat-y}
+.brand__eyebrow{font-size:11px;letter-spacing:.1em;text-transform:uppercase;opacity:.85}
+.brand__name{font:700 22px/1 var(--f-display);letter-spacing:.02em}
+.tabs{display:flex;gap:4px;background:rgba(0,0,0,.18);padding:3px;border-radius:8px}
+.tab{border:0;background:transparent;color:inherit;padding:7px 14px;border-radius:6px;font-weight:600;cursor:pointer}
+.tab.is-active{background:var(--surface);color:var(--ink)}
+.demo{background:var(--sign);color:#1c1606;font-size:13px;font-weight:600;text-align:center;padding:6px 16px}
+
+/* ---------- Vistas ---------- */
+.vista{max-width:960px;margin:0 auto;padding-inline:16px;padding-block:20px 120px;display:grid;gap:18px}
+.intro h1{font:700 clamp(28px,5.5vw,40px)/1.05 var(--f-display);margin:0 0 6px;text-wrap:balance}
+.intro p{margin:0;color:var(--muted);max-width:64ch}
+h2{font:700 19px var(--f-display);letter-spacing:.04em;text-transform:uppercase;margin:0}
+.hint{font-size:13px;color:var(--muted)}
+
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px;display:grid;gap:14px}
+.panel__head{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline;justify-content:space-between}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}
+label{display:grid;gap:4px;font-size:13px;font-weight:600;color:var(--muted);min-width:0}
+label em{color:var(--err);font-style:normal}
+input,select,textarea{background:var(--field);border:1px solid var(--line);border-radius:6px;padding:9px 10px;width:100%;min-width:0;font-size:16px;color:var(--ink)}
+textarea{min-height:60px;resize:vertical}
+.mono{font-family:var(--f-mono);font-size:14px}
+input.is-invalid{border-color:var(--err)}
+:focus-visible{outline:2px solid var(--sign);outline-offset:2px}
+.actions{display:flex;gap:8px;flex-wrap:wrap}
+
+.btn{font-weight:600;font-size:15px;border-radius:6px;padding:10px 14px;border:1px solid var(--line);background:var(--surface);color:var(--ink);cursor:pointer}
+.btn--sm{padding:6px 10px;font-size:13px}
+.btn--primary{background:var(--brand);color:var(--brand-ink);border-color:var(--brand)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+
+/* ---------- Zona de carga ---------- */
+.drop{position:relative;border:2px dashed var(--line);border-radius:10px;padding:26px 16px;text-align:center;display:grid;gap:6px;justify-items:center;background:var(--surface);cursor:pointer;color:var(--ink)}
+.drop:focus-within{outline:2px solid var(--sign);outline-offset:2px}
+.drop.is-over{border-color:var(--sign);background:var(--sign-soft)}
+.drop strong{font:700 21px var(--f-display);letter-spacing:.02em}
+.drop small{color:var(--muted);font-weight:400}
+.drop input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.drop__icon{width:40px;height:30px;border:3px solid var(--brand);border-radius:6px;position:relative}
+.drop__icon::after{content:"";position:absolute;width:10px;height:10px;border:3px solid var(--brand);border-radius:50%;left:50%;top:50%;transform:translate(-50%,-50%)}
+
+.aviso{font-size:14px;padding:10px 12px;border-radius:6px;background:var(--sign-soft);border-left:3px solid var(--sign)}
+.aviso.is-error{border-left-color:var(--err)}
+
+/* ---------- Tarjetas de foto ---------- */
+.lista{display:grid;gap:12px}
+.tarjetas{display:grid;gap:14px}
+.vacio{color:var(--muted);text-align:center;padding:18px;border:1px dashed var(--line);border-radius:10px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;display:grid;grid-template-columns:200px 1fr;overflow:hidden}
+.card.is-guardado{opacity:.75}
+.card__foto{background:var(--line);min-height:150px}
+.card__foto img{width:100%;height:100%;object-fit:cover;display:block}
+.card__cuerpo{padding:14px;display:grid;gap:12px;min-width:0}
+.card__top{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;justify-content:space-between}
+.card__nombre{font:500 13px var(--f-mono);color:var(--muted);overflow-wrap:anywhere;min-width:0}
+.coord{font:500 13px var(--f-mono);color:var(--muted);display:flex;flex-wrap:wrap;gap:4px 12px;align-items:center}
+.coord a{color:var(--brand);font-family:var(--f-body);font-weight:600}
+.alerta{font-size:13px;color:var(--warn);font-weight:600}
+
+.chip{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;padding:3px 8px;border-radius:99px;border:1px solid currentColor;white-space:nowrap}
+.chip--leyendo,.chip--guardando{color:var(--warn)}
+.chip--listo,.chip--guardado{color:var(--ok)}
+.chip--revisar,.chip--error{color:var(--err)}
+@media (prefers-reduced-motion:no-preference){.chip--leyendo,.chip--guardando{animation:pulso 1.2s ease-in-out infinite}@keyframes pulso{50%{opacity:.4}}}
+
+/* ---------- Mapa ---------- */
+.vista--mapa{max-width:none;padding:0;gap:0;height:calc(100vh - 56px);height:calc(100dvh - 56px);grid-template-rows:auto 1fr}
+.mapa-bar{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;padding:10px 16px;background:var(--surface);border-bottom:1px solid var(--line)}
+.mapa-bar input{flex:1;min-width:200px}
+.mapa{min-height:360px}
+.leaflet-popup-content{font:14px/1.4 var(--f-body);margin:12px}
+.pop img{display:block;width:240px;max-width:100%;border-radius:4px;margin-bottom:8px;background:#ddd}
+.pop b{font:700 16px var(--f-display);letter-spacing:.02em}
+.pop small{color:#5e6a62;display:block}
+
+/* ---------- Barra inferior ---------- */
+.barra{position:fixed;left:0;right:0;bottom:0;z-index:1000;background:var(--surface);border-top:1px solid var(--line);padding:10px 16px calc(10px + env(safe-area-inset-bottom,0px))}
+.barra__in{max-width:960px;margin:0 auto;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.barra__cuenta{flex:1;min-width:150px;font-size:14px;color:var(--muted)}
+.barra__cuenta b{font:700 22px var(--f-display);color:var(--ink);font-variant-numeric:tabular-nums}
+
+@media (max-width:600px){
+  .card{grid-template-columns:1fr}
+  .card__foto{aspect-ratio:16/9;min-height:0}
+  .brand__name{font-size:19px}
+}
