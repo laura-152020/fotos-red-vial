@@ -1,8 +1,8 @@
 /**
- * Fotos Red Vial Antioquia — Backend v2 (Google Apps Script)
+ * VIP-C · Visor interactivo de puntos críticos — Backend v3 (Google Apps Script)
  * ----------------------------------------------------------
  * Un solo archivo. Guarda fotos en Drive, lee el sello de la foto con Gemini
- * y registra cada foto en Google Sheets. Expone los datos para el mapa y ArcGIS.
+ * y registra cada punto (con o sin foto) en Google Sheets. Expone los datos para ArcGIS.
  *
  * PROPIEDADES DEL SCRIPT (Configuración del proyecto → Propiedades del script):
  *   GEMINI_API_KEY   Clave de Google AI Studio (https://aistudio.google.com/apikey)
@@ -10,24 +10,27 @@
  *   ROOT_FOLDER_ID   ID de la carpeta raíz en Drive donde se guardan las fotos
  *   SPREADSHEET_ID   ID del Google Sheet que funciona como base de datos
  *   APP_TOKEN        Clave compartida con la página (la misma de config.js)
+ *   ADMIN_TOKEN      Clave de administrador, necesaria para borrar (anular) registros
  *
  * ACCIONES
  *   POST {accion:"leer",  token, base64, mimeType}            → datos del sello (no guarda nada)
- *   POST {accion:"subir", token, base64, mimeType, ...campos} → guarda en Drive + Sheets
- *   GET  ?accion=listar&token=...&formato=json|geojson|csv    → registros para mapa / ArcGIS
+ *   POST {accion:"subir", token, base64?, mimeType, ...campos} → guarda en Drive (si hay foto) + Sheets
+ *   POST {accion:"anular", token, adminToken, id, motivo}   → marca el registro ANULADO y manda la foto a la papelera
+ *   GET  ?accion=listar&token=...&formato=json|geojson|csv    → registros para ArcGIS
  *   GET  (sin parámetros)                                     → estado del servicio
  */
 
-const HOJA = "Registro_Fotografico";
+const HOJA = "Registro_VIPC";
 const COLUMNAS = [
-  "ID", "FechaRegistro", "FechaFoto", "FechaSello", "LatitudDMS", "LongitudDMS",
-  "Latitud", "Longitud", "Via", "Municipio", "Contrato", "Frente",
-  "TipoActividad", "Momento", "Observaciones", "Inspector",
-  "Archivo", "FileId", "URL", "OrigenUbicacion", "SelloLegible", "FueraDeAntioquia"
+  "ID", "FechaRegistro", "FechaVisita", "FechaSello", "LatitudDMS", "LongitudDMS",
+  "Latitud", "Longitud", "CodigoVia", "NombreTramo", "Subregion", "Municipio",
+  "TipoAfectacion", "Responsable", "Estado", "Observaciones", "Origen",
+  "Archivo", "FileId", "URL", "OrigenUbicacion", "SelloLegible", "FueraDeAntioquia",
+  "EstadoRegistro", "FechaAnulacion", "MotivoAnulacion"
 ];
+const RESPONSABLES = ["Gobernación", "Rental", "Alcaldía", "Ciudadanía"];
+const ESTADOS = ["Crítico", "No crítico"];
 const ANTIOQUIA = { latMin: 5.40, latMax: 8.90, lonMin: -77.15, lonMax: -73.85 };
-const TIPOS = ["Remoción de derrumbe", "Limpieza de cunetas", "Perfilado de vía", "Bacheo",
-  "Obras de drenaje", "Muro / contención", "Señalización", "Inspección general", "Otro"];
 
 /* ======================= Entradas HTTP ======================= */
 
@@ -55,6 +58,7 @@ function doPost(e) {
     validarToken_(payload.token);
     if (payload.accion === "leer") return json_(leerSello_(payload));
     if (payload.accion === "subir") return json_(subirFoto_(payload));
+    if (payload.accion === "anular") return json_(anularRegistro_(payload));
     throw new Error("Acción no reconocida.");
   } catch (err) {
     return json_({ status: "error", message: err.message || String(err) });
@@ -74,10 +78,10 @@ function leerSello_(payload) {
     "coordenadas en grados-minutos-segundos y el nombre de la vía.\n" +
     "Lee ese sello EXACTAMENTE como aparece. No inventes: si algo no se lee, devuelve \"\".\n" +
     "Responde SOLO JSON con estas claves:\n" +
-    "fecha_texto (tal cual), fecha_iso (AAAA-MM-DD), latitud (tal cual, ej 6°10'42\"N), " +
-    "longitud (tal cual, ej 75°9'57\"W), via (tal cual), municipio_sugerido (municipio de Antioquia más probable), " +
-    "tipo_actividad (uno de: " + TIPOS.join(", ") + "), observacion (máximo 25 palabras sobre el estado de la vía), " +
-    "sello_legible (true/false).";
+    "fecha_texto (tal cual), fecha_iso (AAAA-MM-DD; las fechas numéricas van en formato día/mes/año), " +
+    "latitud (tal cual, ej 6°10'42\"N), longitud (tal cual, ej 75°9'57\"W), " +
+    "tramo (nombre del tramo sin la palabra Vía, ej \"Granada - Guatapé\"), " +
+    "codigo_via (código oficial de la vía si aparece, ej 60AN17; si no, \"\"), sello_legible (true/false).";
 
   const body = {
     contents: [{ parts: [
@@ -118,10 +122,8 @@ function leerSello_(payload) {
     longitudDMS: d.longitud || "",
     latitud: lat,
     longitud: lon,
-    via: d.via || "",
-    municipio: d.municipio_sugerido || "",
-    tipoActividad: TIPOS.indexOf(d.tipo_actividad) >= 0 ? d.tipo_actividad : "",
-    observacion: d.observacion || "",
+    tramo: String(d.tramo || "").replace(/^\s*v[ií]a\s*/i, ""),
+    codigoVia: String(d.codigo_via || "").toUpperCase().replace(/\s/g, ""),
     selloLegible: !!d.sello_legible && lat !== null && lon !== null,
     fueraDeAntioquia: fueraDeAntioquia_(lat, lon)
   };
@@ -130,23 +132,31 @@ function leerSello_(payload) {
 /* ======================= Guardado (Drive + Sheets) ======================= */
 
 function subirFoto_(p) {
-  if (!p.base64) throw new Error("No llegó la imagen.");
-  if (!texto_(p.contrato)) throw new Error("El contrato es obligatorio.");
-  if (!texto_(p.via)) throw new Error("La vía es obligatoria.");
+  const faltan = [];
+  if (!texto_(p.fecha)) faltan.push("fecha");
+  if (!texto_(p.municipio)) faltan.push("municipio");
+  if (!texto_(p.tipoAfectacion)) faltan.push("tipo de afectación");
+  if (RESPONSABLES.indexOf(texto_(p.responsable)) < 0) faltan.push("responsable de la visita");
+  if (ESTADOS.indexOf(texto_(p.estadoPunto)) < 0) faltan.push("estado");
+  if (!texto_(p.codigoVia) && !texto_(p.nombreTramo)) faltan.push("código de la vía o nombre del tramo");
+  if (faltan.length) throw new Error("Falta: " + faltan.join(", ") + ".");
 
   const lat = numero_(p.latitud), lon = numero_(p.longitud);
   if ((lat === null) !== (lon === null)) throw new Error("Faltan latitud o longitud.");
   if (lat !== null && (lat < -90 || lat > 90 || lon < -180 || lon > 180)) throw new Error("Coordenadas fuera de rango.");
 
-  // Drive: Raíz / Contrato_X / Via_Y / archivo
-  const raiz = DriveApp.getFolderById(prop_("ROOT_FOLDER_ID"));
-  const cContrato = carpeta_(raiz, "Contrato_" + limpiar_(p.contrato));
-  const cVia = carpeta_(cContrato, "Via_" + limpiar_(p.via));
-  const nombre = limpiar_(p.nombreArchivo || "foto_inspeccion.jpg");
-  const blob = Utilities.newBlob(Utilities.base64Decode(p.base64), p.mimeType || "image/jpeg", nombre);
-  const archivo = cVia.createFile(blob);
-  archivo.setDescription("Contrato: " + p.contrato + " | Vía: " + p.via + " | " + (lat !== null ? lat + ", " + lon : "sin coordenadas"));
-  try { archivo.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch (_) { /* dominio restringido */ }
+  // Drive (solo si hay foto): Raíz / Subregion / Municipio / archivo
+  let archivo = null;
+  if (p.base64) {
+    const raiz = DriveApp.getFolderById(prop_("ROOT_FOLDER_ID"));
+    const cSub = carpeta_(raiz, limpiar_(p.subregion || "Sin subregion"));
+    const cMun = carpeta_(cSub, limpiar_(p.municipio));
+    const nombre = limpiar_((texto_(p.fecha) || "sin-fecha") + "_" + (texto_(p.codigoVia) || texto_(p.nombreTramo) || "via") + "_" + (p.nombreArchivo || "foto.jpg"));
+    const blob = Utilities.newBlob(Utilities.base64Decode(p.base64), p.mimeType || "image/jpeg", nombre);
+    archivo = cMun.createFile(blob);
+    archivo.setDescription("VIP-C | " + texto_(p.codigoVia) + " " + texto_(p.nombreTramo) + " | " + texto_(p.municipio) + " | " + texto_(p.estadoPunto));
+    try { archivo.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch (_) { /* dominio restringido */ }
+  }
 
   // Sheets con bloqueo para que el ID consecutivo no se repita
   const lock = LockService.getScriptLock();
@@ -158,15 +168,49 @@ function subirFoto_(p) {
     hoja.appendRow([
       id, ahora, texto_(p.fecha), texto_(p.fechaTexto), texto_(p.latitudDMS), texto_(p.longitudDMS),
       lat === null ? "" : lat, lon === null ? "" : lon,
-      texto_(p.via), texto_(p.municipio), texto_(p.contrato), texto_(p.frente),
-      texto_(p.tipoActividad), texto_(p.momento), texto_(p.observacion), texto_(p.inspector),
-      archivo.getName(), archivo.getId(), archivo.getUrl(),
+      texto_(p.codigoVia).toUpperCase(), texto_(p.nombreTramo), texto_(p.subregion), texto_(p.municipio),
+      texto_(p.tipoAfectacion), texto_(p.responsable), texto_(p.estadoPunto), texto_(p.observaciones),
+      archivo ? "foto" : "manual",
+      archivo ? archivo.getName() : "", archivo ? archivo.getId() : "", archivo ? archivo.getUrl() : "",
       texto_(p.origenUbicacion) || "manual", p.selloLegible ? "SI" : "NO",
-      fueraDeAntioquia_(lat, lon) ? "SI" : "NO"
+      fueraDeAntioquia_(lat, lon) ? "SI" : "NO",
+      "ACTIVO", "", ""
     ]);
-    return { status: "success", id: id, fileId: archivo.getId(), url: archivo.getUrl() };
+    return { status: "success", id: id, fileId: archivo ? archivo.getId() : "", url: archivo ? archivo.getUrl() : "" };
   } catch (err) {
-    return { status: "partial_error", message: "La foto quedó en Drive pero falló el registro en Sheets: " + err.message, fileId: archivo.getId(), url: archivo.getUrl() };
+    return { status: "partial_error", message: (archivo ? "La foto quedó en Drive pero falló" : "Falló") + " el registro en Sheets: " + err.message };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/* ======================= Borrado seguro (anulación) ======================= */
+
+function anularRegistro_(p) {
+  const admin = prop_("ADMIN_TOKEN", true);
+  if (!admin) throw new Error("El borrado no está habilitado: falta la propiedad ADMIN_TOKEN.");
+  if (p.adminToken !== admin) throw new Error("Clave de administrador incorrecta.");
+  if (!texto_(p.id)) throw new Error("Falta el ID del registro.");
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    const hoja = hoja_();
+    const enc = hoja.getRange(1, 1, 1, hoja.getLastColumn()).getValues()[0];
+    const col = function (n) { return enc.indexOf(n) + 1; };
+    const ids = hoja.getRange(2, 1, Math.max(hoja.getLastRow() - 1, 1), 1).getValues();
+    let fila = -1;
+    for (let i = 0; i < ids.length; i++) { if (String(ids[i][0]) === String(p.id)) { fila = i + 2; break; } }
+    if (fila < 0) throw new Error("No se encontró el registro " + p.id + ".");
+
+    hoja.getRange(fila, col("EstadoRegistro")).setValue("ANULADO");
+    hoja.getRange(fila, col("FechaAnulacion")).setValue(Utilities.formatDate(new Date(), "America/Bogota", "yyyy-MM-dd HH:mm:ss"));
+    hoja.getRange(fila, col("MotivoAnulacion")).setValue(texto_(p.motivo) || "Sin motivo");
+
+    const fileId = hoja.getRange(fila, col("FileId")).getValue();
+    let papelera = false;
+    if (fileId) { try { DriveApp.getFileById(String(fileId)).setTrashed(true); papelera = true; } catch (_) { /* ya no existe */ } }
+    return { status: "success", id: p.id, fotoEnPapelera: papelera };
   } finally {
     lock.releaseLock();
   }
@@ -183,7 +227,7 @@ function listarRegistros_() {
     const o = {};
     enc.forEach(function (c, i) { o[c] = fila[i] instanceof Date ? Utilities.formatDate(fila[i], "America/Bogota", "yyyy-MM-dd") : fila[i]; });
     return o;
-  });
+  }).filter(function (o) { return o.EstadoRegistro !== "ANULADO"; });
 }
 
 function aGeoJSON_(registros) {
@@ -227,6 +271,9 @@ function hoja_() {
     h.appendRow(COLUMNAS);
     h.getRange(1, 1, 1, COLUMNAS.length).setFontWeight("bold");
     h.setFrozenRows(1);
+  } else if (h.getLastColumn() < COLUMNAS.length) {
+    // Hoja creada con una versión anterior: agrega los encabezados nuevos
+    h.getRange(1, 1, 1, COLUMNAS.length).setValues([COLUMNAS]).setFontWeight("bold");
   }
   return h;
 }
