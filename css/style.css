@@ -4,8 +4,8 @@
   --bg:#f2f4f1; --surface:#ffffff; --line:#d7dcd5; --ink:#1b231e; --muted:#5b675f;
   --brand:#0b7a3e; --brand-ink:#ffffff; --sign:#f2b705; --sign-soft:#fdf3d0;
   --ok:#2b7d47; --warn:#9a6200; --err:#b3261e; --err-soft:#fbe9e7; --field:#fafbf9;
-  --hdr-bg:#0d5c2f; --hdr-ink:#ffffff; --hdr-line:#0a4a26;
-  --marca-titulo:#000000; --marca-sub:#ffffff; /* título negro, subtítulo blanco */
+  --hdr-bg:#556b2f; --hdr-ink:#ffffff; --hdr-line:#4a5d28; /* verde oliva oscuro */
+  --marca-titulo:#ffffff; --marca-sub:#ffffff; /* título y subtítulo en blanco */
   --f-display:"Barlow Condensed","Arial Narrow",system-ui,sans-serif;
   --f-body:"Barlow",system-ui,-apple-system,"Segoe UI",sans-serif;
   --f-mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
@@ -31,12 +31,12 @@ a{color:var(--brand)}
 .logo{height:92px;width:auto;display:block;flex:none}
 .marca{flex:1;min-width:0;border-left:2px solid rgba(255,255,255,.25);padding:4px 0 4px 22px;display:flex;flex-direction:column;justify-content:center}
 .marca__sigla{font:700 44px/0.95 var(--f-display);letter-spacing:.02em;color:var(--marca-titulo)}
-.marca__nombre{font:600 15px/1.2 var(--f-body);letter-spacing:.08em;text-transform:uppercase;color:var(--marca-sub);margin-top:6px}
-.franja{height:6px;background:linear-gradient(90deg,#0b7a3e 0 70%,#f2b705 70% 100%)}
+.marca__nombre{font:400 15px/1.2 var(--f-body);letter-spacing:.08em;text-transform:uppercase;color:var(--marca-sub);margin-top:6px}
+.franja{height:6px;background:#f2b705}
 
 /* ---------- Contenido ---------- */
 .vista{max-width:960px;margin:0 auto;padding-inline:16px;padding-block:22px 128px;display:grid;gap:18px}
-.intro h1{font:700 clamp(28px,5.5vw,40px)/1.05 var(--f-display);margin:0 0 8px;text-wrap:balance}
+.intro h1{font:700 clamp(22px,4vw,28px)/1.1 var(--f-display);margin:0 0 8px;text-wrap:balance}
 .intro p{margin:0;color:var(--muted);max-width:64ch}
 .modos{margin:10px 0 0;padding-left:22px;display:grid;gap:4px}
 .modos li::marker{font-weight:700;color:var(--brand)}
