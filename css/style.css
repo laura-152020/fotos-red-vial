@@ -5,6 +5,7 @@
   --brand:#0b7a3e; --brand-ink:#ffffff; --sign:#f2b705; --sign-soft:#fdf3d0;
   --ok:#2b7d47; --warn:#9a6200; --err:#b3261e; --err-soft:#fbe9e7; --field:#fafbf9;
   --hdr-bg:#ffffff; --hdr-ink:#1b231e; --hdr-line:#e3e7e1;
+  --marca-bg:#1c8443; --marca-titulo:#000000; --marca-sub:#ffffff; /* contraste: negro 4.4:1 y blanco 4.7:1 sobre este verde */
   --f-display:"Barlow Condensed","Arial Narrow",system-ui,sans-serif;
   --f-body:"Barlow",system-ui,-apple-system,"Segoe UI",sans-serif;
   --f-mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
@@ -28,9 +29,9 @@ a{color:var(--brand)}
 .topbar{background:var(--hdr-bg);color:var(--hdr-ink);padding-top:env(safe-area-inset-top,0px);border-bottom:1px solid var(--hdr-line)}
 .topbar__in{max-width:960px;margin:0 auto;padding:12px 16px;display:flex;align-items:center;gap:14px 22px;flex-wrap:wrap}
 .logo{height:92px;width:auto;display:block;flex:none}
-.marca{border-left:2px solid var(--hdr-line);padding-left:20px;min-width:0}
-.marca__sigla{font:700 40px/0.95 var(--f-display);letter-spacing:.02em;color:#0b7a3e}
-.marca__nombre{font:600 15px/1.2 var(--f-body);letter-spacing:.08em;text-transform:uppercase;color:#4a564e;margin-top:4px}
+.marca{flex:1;min-width:0;background:var(--marca-bg);border-radius:8px;padding:12px 20px;align-self:stretch;display:flex;flex-direction:column;justify-content:center}
+.marca__sigla{font:700 44px/0.95 var(--f-display);letter-spacing:.02em;color:var(--marca-titulo)}
+.marca__nombre{font:600 15px/1.2 var(--f-body);letter-spacing:.08em;text-transform:uppercase;color:var(--marca-sub);margin-top:6px}
 .franja{height:6px;background:linear-gradient(90deg,#0b7a3e 0 70%,#f2b705 70% 100%)}
 
 /* ---------- Contenido ---------- */
@@ -102,7 +103,9 @@ textarea{min-height:64px;resize:vertical}
 .card__cuerpo{padding:14px;display:grid;gap:12px;min-width:0}
 .card__top{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;justify-content:space-between}
 .card__nombre{font:500 13px var(--f-mono);color:var(--muted);overflow-wrap:anywhere;min-width:0}
-.card .grid{grid-template-columns:repeat(auto-fit,minmax(160px,1fr))}
+.grid--2{grid-template-columns:repeat(2,minmax(0,1fr))}
+.card .grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+.card .grid--2{grid-template-columns:repeat(2,minmax(0,1fr))}
 
 .chip{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;padding:3px 8px;border-radius:99px;border:1px solid currentColor;white-space:nowrap}
 .chip--leyendo,.chip--guardando{color:var(--warn)}
@@ -124,15 +127,19 @@ textarea{min-height:64px;resize:vertical}
 .barra__cuenta{flex:1;min-width:150px;font-size:14px;color:var(--muted)}
 .barra__cuenta b{font:700 22px var(--f-display);color:var(--ink);font-variant-numeric:tabular-nums}
 
+@media (max-width:1000px){
+  .card .grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
 @media (max-width:760px){
   .grid{grid-template-columns:repeat(2,minmax(0,1fr))}
   .card{grid-template-columns:1fr}
 }
 @media (max-width:520px){
   .grid,.card .grid{grid-template-columns:1fr}
+  .grid--2,.card .grid--2{grid-template-columns:repeat(2,minmax(0,1fr))} /* Subregión y Municipio siguen lado a lado en el celular */
   .logo{height:66px}
-  .marca{border-left:0;padding-left:0;flex-basis:100%}
-  .marca__sigla{font-size:32px}
+  .marca{flex-basis:100%;padding:10px 14px}
+  .marca__sigla{font-size:34px}
   .marca__nombre{font-size:13px}
   .barra .btn{padding:8px 10px;font-size:14px}
   .barra__cuenta{min-width:0;font-size:13px}
