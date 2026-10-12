@@ -377,9 +377,9 @@
   $("#tarjetas").addEventListener("click", (e) => {
     const b = e.target.closest("button[data-act]"); if (!b) return;
     const r = buscar(b); if (!r) return;
-    if (b.dataset.act === "quitar") { items = items.filter((x) => x !== r); render(); }
+    if (b.dataset.act === "quitar") { items = items.filter((x) => x !== r); render(); if (!HAY_BACKEND) { try { escribirLocal(); } catch (_) {} } }
     if (b.dataset.act === "releer") { cola.push(r); r.estado = "leyendo"; actualizar(r); procesarCola(); }
-    if (b.dataset.act === "ver") abrirVisor(r.dataUrl, r.nombreArchivo);
+    if (b.dataset.act === "ver") abrirVisor(r.dataUrl || r.miniatura, r.nombreArchivo);
   });
 
   /* ======================= Visor ======================= */
@@ -423,6 +423,7 @@
     const lista = pendientes();
     const malos = validarTodos(lista);
     if (malos) { aviso(`${malos} registro(s) con datos obligatorios vacíos (marcados en rojo). Complétalos para guardar.`, true); return; }
+    if (!HAY_BACKEND) { guardarEnDispositivo(lista); return; }
     guardando = true; contadores();
     let ok = 0, mal = 0;
     for (const r of lista) {
@@ -441,6 +442,36 @@
     guardando = false; contadores();
     aviso(mal ? `${ok} guardados, ${mal} con error. Revisa los marcados y vuelve a intentar.` : `${ok} registro(s) guardados.`, mal > 0);
   });
+
+  /* Sin servidor: los registros se guardan en este navegador y se recuperan al volver a abrir la página */
+  const CLAVE_LOCAL = "vipc-registros-v1";
+  const CAMPOS_LOCALES = ["id", "origen", "estado", "idRegistro", "nombreArchivo", "miniatura", "fecha", "fechaTexto", "latitudDMS", "longitudDMS",
+    "latitud", "longitud", "origenUbicacion", "codigoVia", "nombreTramo", "subregion", "municipio", "municipioAuto",
+    "tipoAfectacion", "responsable", "estadoPunto", "observaciones", "selloLegible"];
+  function escribirLocal() {
+    const datos = items.filter((r) => r.estado === "guardado").map((r) => Object.fromEntries(CAMPOS_LOCALES.map((k) => [k, r[k]])));
+    localStorage.setItem(CLAVE_LOCAL, JSON.stringify(datos));
+  }
+  function guardarEnDispositivo(lista) {
+    const previos = lista.map((r) => [r, r.estado, r.idRegistro]);
+    let n = items.filter((r) => r.estado === "guardado").length;
+    lista.forEach((r) => { r.estado = "guardado"; r.idRegistro = r.idRegistro || "L-" + String(++n).padStart(4, "0"); r.mensaje = ""; });
+    try {
+      escribirLocal();
+      lista.forEach(actualizar); contadores();
+      aviso(`${lista.length} registro(s) guardados en este dispositivo. Siguen aquí aunque cierres la página; usa «Descargar CSV» para enviarlos o cargarlos en ArcGIS.`);
+    } catch (e) {
+      previos.forEach(([r, est, id]) => { r.estado = est; r.idRegistro = id; });
+      aviso("No hay espacio en este navegador para guardar más registros. Descarga el CSV y vacía la lista.", true);
+    }
+  }
+  function leerLocal() {
+    try {
+      const datos = JSON.parse(localStorage.getItem(CLAVE_LOCAL) || "[]");
+      if (!Array.isArray(datos)) return;
+      datos.forEach((d) => { items.push(Object.assign(nuevoRegistro(), d, { id: sec++, estado: "guardado", mensaje: "" })); });
+    } catch (_) { /* almacenamiento no disponible */ }
+  }
 
   const COLS = [["Fecha", "fecha"], ["Latitud", "latitud"], ["Longitud", "longitud"], ["LatitudDMS", "latitudDMS"], ["LongitudDMS", "longitudDMS"],
     ["CodigoVia", "codigoVia"], ["NombreTramo", "nombreTramo"], ["Subregion", "subregion"], ["Municipio", "municipio"],
@@ -464,6 +495,7 @@
   vaciar.addEventListener("click", () => {
     if (vaciar.dataset.confirmar) {
       items = []; cola.length = 0; render(); aviso("");
+      try { localStorage.removeItem(CLAVE_LOCAL); } catch (_) {}
       vaciar.textContent = "Vaciar"; delete vaciar.dataset.confirmar; return;
     }
     vaciar.dataset.confirmar = "1"; vaciar.textContent = "Confirmar vaciar";
@@ -482,7 +514,7 @@
   drop.addEventListener("drop", (e) => { if (e.dataTransfer?.files?.length) agregarFotos([...e.dataTransfer.files]); });
 
   /* ======================= Inicio ======================= */
-  $("#guardar").hidden = !HAY_BACKEND;
+  if (!HAY_BACKEND) leerLocal();
   pintarManual();
   render();
   // Precarga el lector en segundo plano para que la primera foto sea más rápida

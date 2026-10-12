@@ -5,7 +5,7 @@
   --brand:#0b7a3e; --brand-ink:#ffffff; --sign:#f2b705; --sign-soft:#fdf3d0;
   --ok:#2b7d47; --warn:#9a6200; --err:#b3261e; --err-soft:#fbe9e7; --field:#fafbf9;
   --hdr-bg:#0d5c2f; --hdr-ink:#ffffff; --hdr-line:#0a4a26;
-  --marca-titulo:#ffffff; --marca-sub:#cfe8d6; /* sobre verde oscuro: blanco 7.9:1 */
+  --marca-titulo:#000000; --marca-sub:#000000; /* pedido: título y subtítulo en negro */
   --f-display:"Barlow Condensed","Arial Narrow",system-ui,sans-serif;
   --f-body:"Barlow",system-ui,-apple-system,"Segoe UI",sans-serif;
   --f-mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;

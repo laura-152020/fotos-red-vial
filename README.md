@@ -52,6 +52,7 @@ Las listas (tipos de afectación, responsables y estados) están al inicio de `j
 ## Sin backend (como queda al subirla)
 
 - Lee las fotos en el navegador. La primera vez descarga el lector, unos 5 MB, y desde ahí cada foto tarda 1 o 2 segundos.
+- **Guardar datos** guarda los registros en el navegador de ese dispositivo: siguen ahí al cerrar y volver a abrir la página. No se comparten con otros dispositivos; para eso está el backend. **Vaciar** los borra.
 - El botón **Descargar CSV** baja todos los registros. El CSV se carga en ArcGIS Online o se abre en Excel.
 - Las fotos **no se guardan** en ningún lado: el CSV solo trae el nombre del archivo. Para guardar fotos y tener una base compartida, conecta el Apps Script.
 
