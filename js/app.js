@@ -112,7 +112,7 @@
         <label for="${p}cv"><span>Código oficial de la vía</span><input id="${p}cv" class="mono" data-k="codigoVia" value="${esc(r.codigoVia)}" placeholder="Ej. 60AN17" autocomplete="off"></label>
         <label for="${p}sr"><span>Subregión ${r.municipioAuto ? '<span class="auto">· automática</span>' : ""}</span><select id="${p}sr" data-k="subregion">${opciones(SUBREGIONES, r.subregion)}</select></label>
         <label for="${p}nt"><span>Nombre del tramo</span><input id="${p}nt" data-k="nombreTramo" value="${esc(r.nombreTramo)}" placeholder="Ej. Medellín - Turbo" autocomplete="off"></label>
-        <label for="${p}mu"><span>Municipio <em>*</em> ${r.municipioAuto ? '<span class="auto">· por coordenadas</span>' : ""}</span><input id="${p}mu" data-k="municipio" value="${esc(r.municipio)}" list="lista-municipios" placeholder="Escribe o elige" autocomplete="off"></label>
+        <label for="${p}mu"><span>Municipio <em>*</em> ${r.municipioAuto ? '<span class="auto">· automático</span>' : ""}</span><input id="${p}mu" data-k="municipio" value="${esc(r.municipio)}" list="lista-municipios" placeholder="Escribe o elige" autocomplete="off"></label>
         <label for="${p}ta"><span>Tipo de afectación <em>*</em></span><select id="${p}ta" data-k="tipoAfectacion">${opciones(TIPOS_AFECTACION, r.tipoAfectacion)}</select></label>
         <label for="${p}re"><span>Responsable de la visita <em>*</em></span><select id="${p}re" data-k="responsable">${opciones(RESPONSABLES, r.responsable)}</select></label>
         <label for="${p}es"><span>Estado <em>*</em></span><select id="${p}es" class="sel-estado" data-v="${esc(r.estadoPunto)}" data-k="estadoPunto">${opciones(ESTADOS, r.estadoPunto)}</select></label>
@@ -264,7 +264,7 @@
     let d = null, error = "";
     if (HAY_BACKEND) {
       const s = await Api.post("leer", { base64: r.base64, mimeType: "image/jpeg" });
-      if (s.status === "success") d = { fecha: s.fecha, fechaTexto: s.fechaTexto, latitud: s.latitud, longitud: s.longitud, latitudDMS: s.latitudDMS, longitudDMS: s.longitudDMS, tramo: s.tramo, codigoVia: s.codigoVia };
+      if (s.status === "success") d = { fecha: s.fecha, fechaTexto: s.fechaTexto, latitud: s.latitud, longitud: s.longitud, latitudDMS: s.latitudDMS, longitudDMS: s.longitudDMS, tramo: s.tramo, codigoVia: s.codigoVia, municipioTexto: s.municipio, tipoAfectacion: s.tipoAfectacion };
     }
     if (!d || d.latitud == null || !d.fecha) {
       try {
@@ -289,13 +289,25 @@
     if (!r.fecha && r.exif && r.exif.fecha) r.fecha = r.exif.fecha;
     if (d.tramo && !r.nombreTramo) r.nombreTramo = d.tramo;
     if (d.codigoVia && !r.codigoVia) r.codigoVia = d.codigoVia;
+    if (d.tipoAfectacion && !r.tipoAfectacion && TIPOS_AFECTACION.includes(d.tipoAfectacion)) r.tipoAfectacion = d.tipoAfectacion;
     completarDesdeCoordenadas(r);
+    // Sin coordenadas: municipio por el nombre escrito en el sello (ej. "Grada el peñol" → El Peñol)
+    if ((!r.municipio || r.municipioAuto) && !tieneCoord(r) && d.municipioTexto) {
+      const m = MUN_POR_NOMBRE[norm(d.municipioTexto)];
+      if (m) { r.municipio = m.n; r.subregion = m.s; r.municipioAuto = true; }
+    }
 
-    const leido = r.fecha && tieneCoord(r);
+    const dudosa = !!d.coordDudosa && r.origenUbicacion === "sello";
+    // El sello nombra un municipio distinto al de las coordenadas: se avisa (los límites usados son aproximados)
+    const otroMun = d.municipioTexto && r.municipio && norm(d.municipioTexto) !== norm(r.municipio) && r.municipioAuto ? d.municipioTexto : "";
+    const leido = r.fecha && tieneCoord(r) && !dudosa;
     r.selloLegible = !!(d.fecha && d.latitud != null);
     r.estado = leido ? "listo" : "revisar";
     r.mensaje = error ? error + " Completa los datos a mano."
-      : leido ? "" : "No se leyó todo el sello. Completa " + [!r.fecha && "la fecha", !tieneCoord(r) && "las coordenadas"].filter(Boolean).join(" y ") + ".";
+      : dudosa ? "Verifica las coordenadas: el sello se leyó con dudas. Compáralas con la foto (toca «Ampliar»)."
+      : leido ? (otroMun ? `El sello menciona «${otroMun}» y las coordenadas caen en ${r.municipio}. Revisa el municipio.` : "") : (!tieneCoord(r) && r.fecha && r.municipio
+        ? "La foto no trae coordenadas. El municipio se tomó del texto del sello; agrega las coordenadas si las tienes."
+        : "No se leyó todo el sello. Completa " + [!r.fecha && "la fecha", !tieneCoord(r) && "las coordenadas"].filter(Boolean).join(" y ") + ".");
     actualizar(r);
   }
 

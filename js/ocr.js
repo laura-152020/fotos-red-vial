@@ -31,34 +31,58 @@ const LectorSello = (function () {
   // modo "blanco": texto blanco → negro sobre blanco.
   // modo "sombra": igual, pero solo conserva blancos que tienen una sombra oscura cerca (descarta cielo y fondos claros).
   // modo "gris": escala de grises invertida con contraste.
-  function franja(img, desdeY, hastaY, modo) {
+  function franja(img, desdeY, hastaY, modo, umbral, desdeX) {
+    umbral = umbral || 185; desdeX = desdeX || 0;
     const sw = img.naturalWidth || img.width, sh = img.naturalHeight || img.height;
     const y0 = Math.round(sh * desdeY), alto = Math.round(sh * (hastaY - desdeY));
+    const x0 = Math.round(sw * desdeX), ancho = sw - x0;
     const escala = Math.min(3, Math.max(1, 2200 / sw));
     const c = document.createElement("canvas");
-    c.width = Math.round(sw * escala); c.height = Math.round(alto * escala);
+    c.width = Math.round(ancho * escala); c.height = Math.round(alto * escala);
     const ctx = c.getContext("2d", { willReadFrequently: true });
     ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(img, 0, y0, sw, alto, 0, 0, c.width, c.height);
+    ctx.drawImage(img, x0, y0, ancho, alto, 0, 0, c.width, c.height);
     const d = ctx.getImageData(0, 0, c.width, c.height), p = d.data;
     for (let i = 0; i < p.length; i += 4) {
       const r = p[i], g = p[i + 1], b = p[i + 2];
       const mn = Math.min(r, g, b), mx = Math.max(r, g, b);
       let v;
-      if (modo === "blanco" || modo === "sombra") v = (mn > 185 && mx - mn < 60) ? 0 : 255;
+      if (modo === "blanco" || modo === "sombra") v = (mn > umbral && mx - mn < 60) ? 0 : 255;
+      else if (modo === "adapt") v = (mx - mn < 60) ? mn : 0; // colores saturados nunca son texto; se resuelve abajo
       else { const l = 0.299 * r + 0.587 * g + 0.114 * b; v = Math.max(0, Math.min(255, (255 - l - 60) * 1.6 + 128)); }
       p[i] = p[i + 1] = p[i + 2] = v; p[i + 3] = 255;
     }
-    if (modo === "sombra") filtrarPorSombra(d, c.width, c.height, Math.max(4, Math.round(c.height * 0.012)), img, y0, escala);
+    if (modo === "sombra") filtrarPorSombra(d, c.width, c.height, Math.max(4, Math.round(c.height * 0.012)), img, x0, y0, escala);
+    if (modo === "adapt") umbralAdaptativo(d, c.width, c.height, 40, 45);
     ctx.putImageData(d, 0, 0);
     return c;
   }
 
+  // Umbral según el fondo local: texto = más claro que el promedio de su entorno + margen (sirve en carretera clara y en vegetación)
+  function umbralAdaptativo(d, w, h, r, margen) {
+    const p = d.data, n = w * h, mn = new Float32Array(n);
+    for (let j = 0, i = 0; j < n; j++, i += 4) mn[j] = p[i];
+    // los valores ya son el mínimo de canal; saturación se revisa abajo con la imagen original no disponible, así que se usa solo brillo
+    const I = new Float64Array((w + 1) * (h + 1));
+    for (let y = 0; y < h; y++) { let fila = 0; for (let x = 0; x < w; x++) { fila += mn[y * w + x]; I[(y + 1) * (w + 1) + x + 1] = I[y * (w + 1) + x + 1] + fila; } }
+    for (let y = 0; y < h; y++) {
+      const y0 = Math.max(0, y - r), y1 = Math.min(h, y + r + 1);
+      for (let x = 0; x < w; x++) {
+        const x0 = Math.max(0, x - r), x1 = Math.min(w, x + r + 1);
+        const suma = I[y1 * (w + 1) + x1] - I[y0 * (w + 1) + x1] - I[y1 * (w + 1) + x0] + I[y0 * (w + 1) + x0];
+        const fondo = suma / ((y1 - y0) * (x1 - x0));
+        const u = Math.min(240, Math.max(185, fondo + margen));
+        const j = y * w + x, v = mn[j] > u ? 0 : 255, i = j * 4;
+        p[i] = p[i + 1] = p[i + 2] = v;
+      }
+    }
+  }
+
   // Mínimo de luminancia en una ventana (2 pasadas separables) para saber si cada píxel tiene sombra cerca.
-  function filtrarPorSombra(d, w, h, r, img, y0, escala) {
+  function filtrarPorSombra(d, w, h, r, img, x0, y0, escala) {
     const cv = document.createElement("canvas"); cv.width = w; cv.height = h;
     const cx = cv.getContext("2d", { willReadFrequently: true });
-    cx.drawImage(img, 0, y0, img.naturalWidth || img.width, h / escala, 0, 0, w, h);
+    cx.drawImage(img, x0, y0, w / escala, h / escala, 0, 0, w, h);
     const o = cx.getImageData(0, 0, w, h).data;
     const lum = new Uint8Array(w * h);
     for (let i = 0, j = 0; j < lum.length; i += 4, j++) lum[j] = (o[i] * 299 + o[i + 1] * 587 + o[i + 2] * 114) / 1000;
@@ -129,9 +153,9 @@ const LectorSello = (function () {
    * Se interpreta cada bloque numérico con las reglas de Antioquia: latitud 5–8° (1 dígito), longitud 73–77° (2 dígitos). */
   function resolverDMS(partes, gLen) {
     const out = [];
-    const add = (g, m, s) => {
+    const add = (g, m, s, incompleto) => {
       if (g === "" || m === "" || s === "" || g == null || m == null || s == null) return;
-      const v = dms(g, m, s); if (v != null) out.push({ v, g: Number(g), m: Number(m), s: String(Number(s)) });
+      const v = dms(g, m, s); if (v != null) out.push({ v, g: Number(g), m: Number(m), s: String(Number(s)), incompleto: !!incompleto });
     };
     const sep = (x) => { const [a, b] = String(x).split("."); return [a, b ? "." + b : ""]; };
     if (partes.length >= 3) {
@@ -140,18 +164,18 @@ const LectorSello = (function () {
     }
     if (partes.length === 2) {
       const [a, b] = partes;
-      if (a.length > gLen) { let m = a.slice(gLen); if (m.length > 2) m = m.slice(-2); add(a.slice(0, gLen), m, b); }
+      if (a.length > gLen) { const m = a.slice(gLen); add(a.slice(0, gLen), m.length > 2 ? m.slice(-2) : m, b); }
       else {
         const [ib, dec] = sep(b);
         if (ib.length === 4) add(a, ib.slice(0, 2), ib.slice(2) + dec);
         if (ib.length === 3) { add(a, ib.slice(0, 1), ib.slice(1) + dec); add(a, ib.slice(0, 2), ib.slice(2) + dec); }
-        if (ib.length <= 2) add(a, dec ? ib + dec : ib, "0"); // grados y minutos decimales
+        if (ib.length <= 2) add(a, dec ? ib + dec : ib, "0", !dec); // minutos decimales, o segundos perdidos por el OCR
       }
     }
     if (partes.length === 1) {
       const [ib, dec] = sep(partes[0]);
       const g = ib.slice(0, gLen), r = ib.slice(gLen);
-      for (const rr of (r.length === 5 ? [r, r.slice(1)] : [r])) {
+      for (const rr of (r.length >= 4 ? [r, r.slice(1)] : [r])) {
         if (rr.length === 4) add(g, rr.slice(0, 2), rr.slice(2) + dec);
         if (rr.length === 3) add(g, rr.slice(0, 1), rr.slice(1) + dec);
       }
@@ -162,12 +186,18 @@ const LectorSello = (function () {
   function leerBloque(bloque, tipo) {
     const partes = bloque.replace(/,/g, ".").split(/[^0-9.]+/).map((p) => p.replace(/^\.+|\.+$/g, "")).filter((p) => /\d/.test(p));
     if (!partes.length) return null;
-    const cands = resolverDMS(partes, tipo === "lat" ? 1 : 2);
-    for (const c of cands) {
-      const ok = tipo === "lat" ? (c.v >= ANT.latMin && c.v <= ANT.latMax) : (c.v >= ANT.lonMin && c.v <= ANT.lonMax);
-      if (ok) return { v: c.v, txt: `${c.g}°${c.m}'${c.s}"${tipo === "lat" ? "N" : "W"}` };
+    if (partes.length === 1 && /^\d{1,3}\.\d{3,}$/.test(partes[0])) { // grados decimales
+      const v = Number(partes[0]);
+      const ok = tipo === "lat" ? (v >= ANT.latMin && v <= ANT.latMax) : (v >= ANT.lonMin && v <= ANT.lonMax);
+      if (ok) return { v, txt: String(v) };
     }
-    return null;
+    const validos = resolverDMS(partes, tipo === "lat" ? 1 : 2)
+      .filter((c) => tipo === "lat" ? (c.v >= ANT.latMin && c.v <= ANT.latMax) : (c.v >= ANT.lonMin && c.v <= ANT.lonMax));
+    if (!validos.length) return null;
+    const distintos = new Set(validos.map((c) => c.v.toFixed(5))).size;
+    const c = validos[0];
+    // dudoso: el OCR perdió separadores y hay más de una lectura posible (ej. 755947 = 75°59'47" o 75°9'47")
+    return { v: c.v, txt: `${c.g}°${c.m}'${c.s}"${tipo === "lat" ? "N" : "W"}`, dudoso: distintos > 1 || c.incompleto };
   }
 
   function buscarCoordenadas(texto) {
@@ -190,7 +220,7 @@ const LectorSello = (function () {
       // Hemisferio perdido: busca el bloque que falta en la misma línea
       if (lat && !lon) { const b = l.match(/(7[3-7][0-9°'". ]{3,20})/); if (b) lon = leerBloque(b[1], "lon"); }
       if (lon && !lat) { const b = l.match(/(?:^|[^0-9])([5-8][0-9°'". ]{3,14})/); if (b) lat = leerBloque(b[1], "lat"); }
-      if (lat && lon) return { lat: r6(lat.v), lon: r6(-lon.v), latTxt: lat.txt, lonTxt: lon.txt };
+      if (lat && lon) return { lat: r6(lat.v), lon: r6(-lon.v), latTxt: lat.txt, lonTxt: lon.txt, dudoso: !!(lat.dudoso || lon.dudoso) };
     }
 
     // 2) Grados y minutos decimales: 6°10.700'N 75°9.950'W
@@ -225,7 +255,45 @@ const LectorSello = (function () {
       const m = l.match(/([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ .]{2,})\s*[-–—]\s*([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ .]{2,})/);
       if (m) return { tramo: limpiarTramo(m[0]), codigo };
     }
+    // Respaldo: última línea con palabras (ej. "Grada el peñol"), sin fechas, coordenadas ni el logo
+    const RUIDO = /secretar|infraestructura|emergencia|gobernaci|trabajamos|rentan|vial(es)?$/i;
+    for (let i = lineas.length - 1; i >= 0; i--) {
+      const l = lineas[i];
+      if (/\d/.test(l) || RUIDO.test(l)) continue;
+      let toks = l.split(/\s+/);
+      // Ruido a la izquierda del sello: se corta en el último símbolo suelto (">.", "|", "—"…), sin tocar el guion del tramo
+      const ultimoSimbolo = toks.reduce((k, t, i) => (/^[^A-Za-zÁÉÍÓÚÑáéíóúñ0-9]+$/.test(t) && t !== "-" ? i : k), -1);
+      if (ultimoSimbolo >= 0) toks = toks.slice(ultimoSimbolo + 1);
+      while (toks.length && !/^[A-Za-zÁÉÍÓÚÑáéíóúñ]{3,}/.test(toks[0])) toks.shift();
+      const t = limpiarTramo(toks.join(" "));
+      if (calidadTramo(t) >= 2) return { tramo: t, codigo };
+    }
     return { tramo: "", codigo };
+  }
+
+  // Busca nombres de municipios de Antioquia en el texto del sello (ej. "Grada el peñol" → El Peñol)
+  function buscarMunicipio(texto) {
+    if (typeof MUNICIPIOS === "undefined") return "";
+    const t = " " + sinTildes(texto).toLowerCase().replace(/[^a-z0-9ñ ]+/g, " ").replace(/\s+/g, " ") + " ";
+    let mejor = null, pos = Infinity;
+    for (const m of MUNICIPIOS) {
+      const nombres = [m.n, m.n.replace(/^(El|La) /, "")];
+      for (const n of nombres) {
+        const k = " " + sinTildes(n).toLowerCase() + " ";
+        if (k.trim().length < 4) continue;
+        const i = t.indexOf(k);
+        if (i >= 0 && (i < pos || (i === pos && k.length > (mejor ? mejor.k.length : 0)))) { mejor = { m, k }; pos = i; }
+      }
+    }
+    return mejor ? mejor.m.n : "";
+  }
+  // Calidad de un nombre de tramo: palabras reales (≥3 letras, con vocal) y pocos símbolos sueltos
+  function calidadTramo(t) {
+    if (!t) return 0;
+    const letras = (t.match(/[A-Za-zÁÉÍÓÚÑáéíóúñ]/g) || []).length;
+    if (letras / t.replace(/\s/g, "").length < 0.8) return 0;
+    const palabras = t.split(/[\s-]+/).filter((w) => /^[A-Za-zÁÉÍÓÚÑáéíóúñ]{3,}$/.test(w) && /[aeiouáéíóú]/i.test(w));
+    return palabras.length + (/ - /.test(t) ? 1 : 0) + (/[áéíóúñ]/i.test(t) ? 0.5 : 0);
   }
   function limpiarTramo(s) {
     return s.replace(/[|_~«»"]/g, "")
@@ -240,32 +308,39 @@ const LectorSello = (function () {
     return {
       fecha: f ? f.iso : "", fechaTexto: f ? f.texto : "",
       latitud: c ? c.lat : null, longitud: c ? c.lon : null,
-      latitudDMS: c ? c.latTxt : "", longitudDMS: c ? c.lonTxt : "",
-      tramo: v.tramo, codigoVia: v.codigo
+      latitudDMS: c ? c.latTxt : "", longitudDMS: c ? c.lonTxt : "", coordDudosa: !!(c && c.dudoso),
+      tramo: v.tramo, codigoVia: v.codigo, municipioTexto: buscarMunicipio(texto)
     };
   }
 
-  function puntaje(r) { return (r.latitud != null ? 4 : 0) + (r.fecha ? 2 : 0) + (r.tramo ? 1 : 0); }
+  function puntaje(r) { return (r.latitud != null ? (r.coordDudosa ? 2 : 4) : 0) + (r.fecha ? 2 : 0) + (r.tramo ? 1 : 0); }
 
   /* ---------- Lectura completa ---------- */
   async function leer(src) {
     const img = await cargarImagen(src);
     const w = await iniciar();
-    const intentos = [[0.55, 1, "blanco"], [0.55, 1, "sombra"], [0.35, 1, "blanco"], [0.55, 1, "gris"], [0, 0.4, "blanco"]];
-    let mejor = null, textos = [];
-    for (const [a, b, modo] of intentos) {
-      const { data } = await w.recognize(franja(img, a, b, modo));
+    // [desde, hasta, modo, umbral de blanco]. El primero sirve casi siempre; los demás cubren fondos claros, sellos más altos o arriba.
+    // [desdeY, hastaY, modo, umbral, desdeX]. Los sellos de cámara suelen ir abajo a la derecha: primero esa zona (menos ruido), luego todo el ancho.
+    const intentos = [[0.55, 1, "adapt", 0, 0.4], [0.55, 1, "blanco", 235, 0.4], [0.55, 1, "adapt"], [0.55, 1, "blanco", 200], [0.55, 1, "sombra", 185], [0.35, 1, "adapt"], [0.55, 1, "gris"], [0, 0.4, "adapt"]];
+    let mejor = null, textos = [], textosN = 0;
+    for (const [a, b, modo, umbral, x] of intentos) {
+      const { data } = await w.recognize(franja(img, a, b, modo, umbral, x));
       textos.push(data.text);
       const r = interpretar(data.text);
       // Combina lo mejor de cada intento
       if (!mejor) mejor = r;
       else {
-        if (mejor.latitud == null && r.latitud != null) Object.assign(mejor, { latitud: r.latitud, longitud: r.longitud, latitudDMS: r.latitudDMS, longitudDMS: r.longitudDMS });
+        if (r.latitud != null && (mejor.latitud == null || (mejor.coordDudosa && !r.coordDudosa)))
+          Object.assign(mejor, { latitud: r.latitud, longitud: r.longitud, latitudDMS: r.latitudDMS, longitudDMS: r.longitudDMS, coordDudosa: r.coordDudosa });
         if (!mejor.fecha && r.fecha) Object.assign(mejor, { fecha: r.fecha, fechaTexto: r.fechaTexto });
-        if (!mejor.tramo && r.tramo) mejor.tramo = r.tramo;
+        if (r.tramo && calidadTramo(r.tramo) > calidadTramo(mejor.tramo)) mejor.tramo = r.tramo;
         if (!mejor.codigoVia && r.codigoVia) mejor.codigoVia = r.codigoVia;
+        if (!mejor.municipioTexto && r.municipioTexto) mejor.municipioTexto = r.municipioTexto;
       }
+      textosN = textos.length;
       if (puntaje(mejor) >= 7) break;
+      if (textosN >= 3 && mejor.fecha && mejor.tramo && mejor.latitud == null) break; // sello sin coordenadas: no insistir
+      if (textosN >= 4 && mejor.fecha && mejor.latitud != null) break;                 // lectura dudosa: no alargar más
     }
     mejor.textoLeido = textos.join("\n---\n");
     mejor.selloLegible = mejor.latitud != null && !!mejor.fecha;

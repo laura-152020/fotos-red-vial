@@ -35,12 +35,12 @@ backend/appsscript.json          Manifiesto del Apps Script
 | Campo | Cómo se llena |
 |---|---|
 | Fecha de la visita * | Del sello de la foto. Si no hay, del GPS interno o a mano |
-| Latitud / Longitud | Del sello, del GPS de la foto, de «Usar mi ubicación actual» o a mano (acepta `6°10'42"N` o `6.178333`) |
+| Latitud / Longitud | Del sello (`6°10'42"N 75°9'57"W` o `+6,1694N -75,1630W`), del GPS de la foto, de «Usar mi ubicación actual» o a mano |
 | Código oficial de la vía | A mano (se lee del sello si aparece, ej. `60AN17`) |
-| Nombre del tramo | Del sello («Vía Granada - Guatapé» → `Granada - Guatapé`) o a mano, ej. `Medellín - Turbo` |
+| Nombre del tramo | Del sello («Vía Granada - Guatapé» → `Granada - Guatapé`; si no dice «Vía», la última línea, ej. `Grada el peñol`) o a mano |
 | Subregión | Automática a partir del municipio |
-| Municipio * | Automático a partir de las coordenadas, o se elige de la lista |
-| Tipo de afectación * | Lista desplegable |
+| Municipio * | Automático: por coordenadas; si la foto no trae coordenadas, por el nombre escrito en el sello (ej. «Grada el peñol» → El Peñol) |
+| Tipo de afectación * | Lista desplegable. Con el backend conectado, Gemini lo sugiere mirando la foto |
 | Responsable de la visita * | Gobernación · Rental · Alcaldía · Ciudadanía |
 | Estado * | Crítico · No crítico |
 | Observaciones | Texto libre (sin relleno automático) |

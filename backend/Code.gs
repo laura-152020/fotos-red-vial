@@ -29,6 +29,9 @@ const COLUMNAS = [
   "EstadoRegistro", "FechaAnulacion", "MotivoAnulacion"
 ];
 const RESPONSABLES = ["Gobernación", "Rental", "Alcaldía", "Ciudadanía"];
+const TIPOS_AFECTACION = ["Derrumbe", "Deslizamiento / movimiento en masa", "Pérdida de banca", "Hundimiento de la vía",
+  "Socavación", "Caída de rocas", "Obstrucción de drenaje o alcantarilla", "Daño en puente o pontón",
+  "Daño en muro de contención", "Deterioro de la calzada (baches)", "Inundación", "Árbol caído", "Otro"];
 const ESTADOS = ["Crítico", "No crítico"];
 const ANTIOQUIA = { latMin: 5.40, latMax: 8.90, lonMin: -77.15, lonMax: -73.85 };
 
@@ -81,7 +84,10 @@ function leerSello_(payload) {
     "fecha_texto (tal cual), fecha_iso (AAAA-MM-DD; las fechas numéricas van en formato día/mes/año), " +
     "latitud (tal cual, ej 6°10'42\"N), longitud (tal cual, ej 75°9'57\"W), " +
     "tramo (nombre del tramo sin la palabra Vía, ej \"Granada - Guatapé\"), " +
-    "codigo_via (código oficial de la vía si aparece, ej 60AN17; si no, \"\"), sello_legible (true/false).";
+    "codigo_via (código oficial de la vía si aparece, ej 60AN17; si no, \"\"), " +
+    "municipio (municipio de Antioquia escrito en el sello, si aparece; si no, \"\"), " +
+    "tipo_afectacion (lo que se VE en la foto, exactamente uno de: " + TIPOS_AFECTACION.join(" | ") + "), " +
+    "sello_legible (true/false). Las coordenadas pueden venir en grados decimales, ej +6,1694N -75,1630W.";
 
   const body = {
     contents: [{ parts: [
@@ -124,6 +130,8 @@ function leerSello_(payload) {
     longitud: lon,
     tramo: String(d.tramo || "").replace(/^\s*v[ií]a\s*/i, ""),
     codigoVia: String(d.codigo_via || "").toUpperCase().replace(/\s/g, ""),
+    municipio: String(d.municipio || ""),
+    tipoAfectacion: TIPOS_AFECTACION.indexOf(d.tipo_afectacion) >= 0 ? d.tipo_afectacion : "",
     selloLegible: !!d.sello_legible && lat !== null && lon !== null,
     fueraDeAntioquia: fueraDeAntioquia_(lat, lon)
   };
