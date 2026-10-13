@@ -10,7 +10,7 @@ En los dos casos, el municipio se deduce de las coordenadas y la subregión del 
 ```
 Página (GitHub Pages)
   ├─ Lectura del sello en el navegador (OCR, sin servidor)      ← siempre disponible
-  ├─ Descargar CSV                                               ← siempre disponible
+  ├─ Guardar datos en el navegador del dispositivo               ← sin servidor
   └─ Apps Script (opcional) ──▶ Gemini (lectura más precisa)
                              ├─▶ Google Drive  (Raíz / Subregión / Municipio / foto.jpg)
                              └─▶ Google Sheets (hoja Registro_VIPC, una fila por punto) ──▶ ArcGIS (CSV / GeoJSON)
@@ -23,7 +23,7 @@ index.html                       Página
 css/style.css                    Estilos
 img/logo-gobernacion-antioquia.png   Logo con fondo transparente
 js/config.js                     ÚNICO archivo a editar al desplegar (URL y clave del Apps Script)
-js/app.js                        Formulario, lista de registros, guardado y CSV
+js/app.js                        Formulario, lista de registros y guardado
 js/ocr.js                        Lectura del sello (fecha, coordenadas, tramo, código de vía)
 js/municipios.js                 125 municipios con subregión y límites (DANE, MGN 2018)
 backend/Code.gs                  Apps Script (un solo archivo)
@@ -53,8 +53,7 @@ Las listas (tipos de afectación, responsables y estados) están al inicio de `j
 
 - Lee las fotos en el navegador. La primera vez descarga el lector, unos 5 MB, y desde ahí cada foto tarda 1 o 2 segundos.
 - **Guardar datos** guarda los registros en el navegador de ese dispositivo: siguen ahí al cerrar y volver a abrir la página. No se comparten con otros dispositivos; para eso está el backend. **Vaciar** los borra.
-- El botón **Descargar CSV** baja todos los registros. El CSV se carga en ArcGIS Online o se abre en Excel.
-- Las fotos **no se guardan** en ningún lado: el CSV solo trae el nombre del archivo. Para guardar fotos y tener una base compartida, conecta el Apps Script.
+- Las fotos y los datos **no salen del dispositivo**. Para guardar fotos y tener una base compartida (y llevar los datos a ArcGIS), conecta el Apps Script.
 
 ## Conectar el backend (Drive + Sheets)
 
@@ -92,8 +91,7 @@ Aparece el botón **Guardar todos**, y la lectura pasa a usar Gemini. Si Gemini 
 > ¿Ya tenías la versión anterior conectada? Esta versión escribe en una hoja nueva, `Registro_VIPC`, con las columnas nuevas. La hoja anterior queda intacta. Después de pegar el nuevo `Code.gs`, haz **Implementar → Gestionar implementaciones → Editar → Versión nueva**.
 
 ## Llevar los datos a ArcGIS
-- **Sin backend:** usa el CSV de **Descargar CSV**. En ArcGIS Online: **Contenido → Nuevo elemento**, arrastra el CSV, ubicación por **Coordenadas** (`Latitud`, `Longitud`).
-- **Con backend:** usa `URL_EXEC?accion=listar&formato=csv&token=TU_TOKEN`, o `formato=geojson`.
+- Con el backend conectado, usa `URL_EXEC?accion=listar&formato=csv&token=TU_TOKEN`, o `formato=geojson`.
 
 ## Notas
 - Los límites municipales vienen del Marco Geoestadístico Nacional 2018 del DANE, simplificados. Cerca de un límite el municipio sugerido puede ser el vecino; siempre se puede corregir a mano.

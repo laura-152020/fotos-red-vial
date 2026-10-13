@@ -1,6 +1,6 @@
 /* VIP-C — Visor interactivo de puntos críticos · Gobernación de Antioquia
  * 1) Carga manual de datos  ·  2) Carga fotográfica con relleno automático (lectura del sello)
- * Guardado: Apps Script (Drive + Sheets) si hay API_URL configurada; siempre se puede descargar CSV.
+ * Guardado: Apps Script (Drive + Sheets) si hay API_URL configurada; si no, en el navegador del dispositivo.
  */
 (function () {
   "use strict";
@@ -363,7 +363,6 @@
     $("#n-leyendo").textContent = leyendo ? "· " + leyendo + " leyendo" : "";
     $("#resumen").textContent = items.length ? `${items.length} en la lista${HAY_BACKEND ? " · " + guardados + " guardados" : ""}` : "";
     $("#guardar").disabled = !p || guardando;
-    $("#descargar").disabled = !items.length;
   }
 
   const buscar = (el) => items.find((x) => x.id == el.closest(".card")?.dataset.id);
@@ -459,10 +458,10 @@
     try {
       escribirLocal();
       lista.forEach(actualizar); contadores();
-      aviso(`${lista.length} registro(s) guardados en este dispositivo. Siguen aquí aunque cierres la página; usa «Descargar CSV» para enviarlos o cargarlos en ArcGIS.`);
+      aviso(`${lista.length} registro(s) guardados en este dispositivo. Siguen aquí aunque cierres la página.`);
     } catch (e) {
       previos.forEach(([r, est, id]) => { r.estado = est; r.idRegistro = id; });
-      aviso("No hay espacio en este navegador para guardar más registros. Descarga el CSV y vacía la lista.", true);
+      aviso("No hay espacio en este navegador para guardar más registros. Vacía la lista o conecta el servidor.", true);
     }
   }
   function leerLocal() {
@@ -477,20 +476,6 @@
     ["CodigoVia", "codigoVia"], ["NombreTramo", "nombreTramo"], ["Subregion", "subregion"], ["Municipio", "municipio"],
     ["TipoAfectacion", "tipoAfectacion"], ["Responsable", "responsable"], ["Estado", "estadoPunto"], ["Observaciones", "observaciones"],
     ["Origen", "origen"], ["Foto", "nombreArchivo"], ["FechaSello", "fechaTexto"], ["OrigenUbicacion", "origenUbicacion"]];
-  $("#descargar").addEventListener("click", () => {
-    const lista = items.filter((r) => r.estado !== "leyendo");
-    if (!lista.length) { aviso("No hay registros para descargar.", true); return; }
-    const malos = validarTodos(lista);
-    const q = (v) => { v = v == null ? "" : String(v); return /[",;\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
-    const csv = "﻿" + COLS.map((c) => c[0]).join(",") + "\n" + lista.map((r) => COLS.map(([, k]) => q(r[k])).join(",")).join("\n");
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
-    a.download = "VIP-C_puntos_criticos_" + hoy() + ".csv";
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(a.href), 3000);
-    aviso(`CSV descargado con ${lista.length} registro(s).` + (malos ? ` Atención: ${malos} tienen datos obligatorios vacíos (marcados en rojo).` : ""), malos > 0);
-  });
-
   const vaciar = $("#vaciar");
   vaciar.addEventListener("click", () => {
     if (vaciar.dataset.confirmar) {
