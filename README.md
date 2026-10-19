@@ -49,11 +49,26 @@ backend/appsscript.json          Manifiesto del Apps Script
 
 Las listas (tipos de afectación, responsables y estados) están al inicio de `js/app.js`. Si cambias responsables o estados, cámbialos también al inicio de `backend/Code.gs`.
 
-## Sin backend (como queda al subirla)
+## Acceso con usuario y contraseña
 
-- Lee las fotos en el navegador. La primera vez descarga el lector, unos 5 MB, y desde ahí cada foto tarda 1 o 2 segundos.
-- **Guardar datos** guarda los registros en el navegador de ese dispositivo: siguen ahí al cerrar y volver a abrir la página. No se comparten con otros dispositivos; para eso está el backend. **Vaciar** los borra.
-- Las fotos y los datos **no salen del dispositivo**. Para guardar fotos y tener una base compartida (y llevar los datos a ArcGIS), conecta el Apps Script.
+La página abre con una pantalla de **Ingreso**. Solo entran las personas registradas en la hoja **Usuarios** del Google Sheet. **Sin el Apps Script conectado nadie puede entrar**: la pantalla dice que el acceso no está configurado.
+
+**Dar de alta a una persona** (en la hoja `Usuarios`, que se crea sola):
+
+| Usuario | Nombre | Rol | Activo | ContraseñaNueva | Hash | Sal | UltimoIngreso |
+|---|---|---|---|---|---|---|---|
+| `jperez` | Juan Pérez | usuario | SI | `Clave-Segura-2026` | *(automático)* | *(automático)* | *(automático)* |
+
+- Escribe la contraseña en **ContraseñaNueva**. En el primer ingreso se cifra y **se borra de la hoja**, así que nadie la vuelve a ver. Para cifrarla de inmediato, ejecuta `actualizarUsuarios` en el editor del Apps Script.
+- **Dar de baja:** pon `NO` en **Activo**. Si esa persona tenía la sesión abierta, pierde el acceso en su siguiente acción.
+- **Cambiar contraseña** (o si alguien la olvidó): escribe una nueva en **ContraseñaNueva**.
+- La sesión dura **8 horas**. Después de **5 intentos fallidos**, el usuario queda bloqueado 15 minutos.
+- Cada registro guardado queda con el usuario que lo cargó (columna `RegistradoPor`).
+- **Cerrar todas las sesiones de una vez:** borra la propiedad `SESSION_SECRET` del Apps Script; se crea otra sola.
+
+**Qué protege y qué no:** los datos, el guardado y la lectura con Gemini exigen sesión válida, y eso lo controla el servidor. El diseño de la página (HTML y JS) sigue siendo público en GitHub Pages, aunque sin sesión no muestra el formulario ni permite usarlo.
+
+La lectura de fotos en el navegador tarda 1 o 2 segundos por foto. La primera vez descarga el lector, unos 5 MB.
 
 ## Conectar el backend (Drive + Sheets)
 
@@ -76,24 +91,25 @@ La hoja `Registro_VIPC` se crea sola.
    | `GEMINI_API_KEY` | la clave del paso 1 |
    | `ROOT_FOLDER_ID` | ID de la carpeta |
    | `SPREADSHEET_ID` | ID del Sheet |
-   | `APP_TOKEN` | una clave inventada, ej. `vipc-2026` |
-   | `ADMIN_TOKEN` | otra clave, para anular registros |
+   | `ADMIN_TOKEN` | una clave larga inventada: para anular registros y exportar a ArcGIS |
+   | `APP_TOKEN` | opcional (el acceso ya lo controlan los usuarios) |
    | `GEMINI_MODEL` | opcional; por defecto `gemini-3.8-flash` |
 
-4. Ejecuta `probarConfiguracion` y acepta los permisos.
-5. Ve a **Implementar → Nueva implementación → Aplicación web**, con «Ejecutar como: Yo» y acceso para «Cualquier usuario». Copia la URL `/exec`.
+4. Ejecuta `probarConfiguracion` y acepta los permisos. Esto crea las hojas `Registro_VIPC` y `Usuarios`.
+5. En la hoja `Usuarios`, da de alta al menos tu propio usuario (ver «Acceso con usuario y contraseña»).
+6. Ve a **Implementar → Nueva implementación → Aplicación web**, con «Ejecutar como: Yo» y acceso para «Cualquier usuario». Copia la URL `/exec`.
 
 ### 4. Página
-En `js/config.js`, pon la URL `/exec` en `API_URL` y la clave de `APP_TOKEN` en `TOKEN`. Haz commit.
+En `js/config.js`, pon la URL `/exec` en `API_URL` (y en `TOKEN` la clave de `APP_TOKEN`, solo si la configuraste). Haz commit.
 
-Aparece el botón **Guardar todos**, y la lectura pasa a usar Gemini. Si Gemini falla, la página usa automáticamente el lector del navegador.
+Desde ese momento la página pide usuario y contraseña. **Guardar datos** guarda en Drive y Sheets, y la lectura usa Gemini; si Gemini falla, se usa el lector del navegador.
 
 > ¿Ya tenías la versión anterior conectada? Esta versión escribe en una hoja nueva, `Registro_VIPC`, con las columnas nuevas. La hoja anterior queda intacta. Después de pegar el nuevo `Code.gs`, haz **Implementar → Gestionar implementaciones → Editar → Versión nueva**.
 
 ## Llevar los datos a ArcGIS
-- Con el backend conectado, usa `URL_EXEC?accion=listar&formato=csv&token=TU_TOKEN`, o `formato=geojson`.
+- Usa `URL_EXEC?accion=listar&formato=csv&admin=TU_ADMIN_TOKEN`, o `formato=geojson`. Comparte ese enlace solo con quien administre ArcGIS: da acceso a todos los datos.
 
 ## Notas
 - Los límites municipales vienen del Marco Geoestadístico Nacional 2018 del DANE, simplificados. Cerca de un límite el municipio sugerido puede ser el vecino; siempre se puede corregir a mano.
 - La lectura del sello está ajustada a Antioquia: latitud 5° a 9° N y longitud 73° a 77° W. Si un sello no se lee completo, la tarjeta queda en **Revisar** y dice qué falta.
-- Anular un registro guardado (con backend): `POST {accion:"anular", token, adminToken, id, motivo}`. La fila queda como `ANULADO` y la foto va a la papelera de Drive.
+- Anular un registro guardado (con backend): `POST {accion:"anular", sesion, adminToken, id, motivo}`. La fila queda como `ANULADO` y la foto va a la papelera de Drive.

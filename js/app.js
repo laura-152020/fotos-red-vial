@@ -398,10 +398,13 @@
         const r = await fetch(CONFIG.API_URL, {
           method: "POST",
           headers: { "Content-Type": "text/plain;charset=utf-8" }, // evita preflight CORS en Apps Script
-          body: JSON.stringify(Object.assign({ accion, token: CONFIG.TOKEN }, datos)),
+          body: JSON.stringify(Object.assign({ accion, token: CONFIG.TOKEN, sesion: Sesion.token() }, datos)),
           redirect: "follow"
         });
         const t = await r.text();
+        let res;
+        try { res = JSON.parse(t); } catch (_) { res = null; }
+        if (res) { if (res.status === "sin_sesion" && accion !== "login") Sesion.vencida(res.message); return res; }
         try { return JSON.parse(t); }
         catch (_) { return { status: "error", message: /accounts\.google\.com|Sign in/i.test(t) ? "El servidor pide inicio de sesión. Revisa que la implementación tenga acceso para «Cualquier usuario»." : "Respuesta inesperada del servidor." }; }
       } catch (e) { return { status: "error", message: "Sin conexión con el servidor. Revisa internet e intenta de nuevo." }; }
@@ -498,10 +501,74 @@
   ["dragleave", "drop"].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.remove("is-over"); }));
   drop.addEventListener("drop", (e) => { if (e.dataTransfer?.files?.length) agregarFotos([...e.dataTransfer.files]); });
 
+  /* ======================= Acceso (usuario y contraseña) ======================= */
+  const Sesion = (function () {
+    const CLAVE = "vipc-sesion";
+    let actual = null;
+    try { actual = JSON.parse(localStorage.getItem(CLAVE) || "null"); } catch (_) { actual = null; }
+    if (actual && !(actual.expira > Date.now())) actual = null;
+    return {
+      token: () => (actual ? actual.sesion : ""),
+      datos: () => actual,
+      guardar(d) { actual = d; try { localStorage.setItem(CLAVE, JSON.stringify(d)); } catch (_) {} },
+      borrar() { actual = null; try { localStorage.removeItem(CLAVE); } catch (_) {} },
+      vencida(msg) { this.borrar(); mostrarAcceso(msg || "Tu sesión venció. Inicia sesión de nuevo."); }
+    };
+  })();
+
+  function mostrarAcceso(msg) {
+    $("#app").hidden = true; $("#barra").hidden = true; $("#usuario").hidden = true;
+    $("#acceso").hidden = false;
+    $("#acc-msg").textContent = msg || "";
+    $("#acc-entrar").disabled = !HAY_BACKEND;
+    setTimeout(() => { try { $("#acc-usuario").focus(); } catch (_) {} }, 50);
+  }
+  let appIniciada = false;
+  function mostrarApp() {
+    const d = Sesion.datos();
+    $("#acceso").hidden = true; $("#app").hidden = false; $("#barra").hidden = false;
+    $("#usuario").hidden = false; $("#usuario-nombre").textContent = d ? d.nombre : "";
+    if (!appIniciada) {
+      appIniciada = true;
+      pintarManual();
+      render();
+      // Precarga el lector en segundo plano para que la primera foto sea más rápida
+      setTimeout(() => { try { LectorSello.iniciar().catch(() => {}); } catch (_) {} }, 1500);
+    }
+  }
+
+  $("#form-acceso").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const usuario = $("#acc-usuario").value.trim(), clave = $("#acc-clave").value;
+    if (!usuario || !clave) { $("#acc-msg").textContent = "Escribe tu usuario y tu contraseña."; return; }
+    const b = $("#acc-entrar"); b.disabled = true; b.textContent = "Verificando…"; $("#acc-msg").textContent = "";
+    const r = await Api.post("login", { usuario, clave });
+    b.disabled = false; b.textContent = "Ingresar";
+    if (r.status !== "success") { $("#acc-msg").textContent = r.message || "No se pudo iniciar sesión."; $("#acc-clave").select(); return; }
+    Sesion.guardar({ sesion: r.sesion, usuario: r.usuario, nombre: r.nombre, rol: r.rol, expira: r.expira });
+    $("#acc-clave").value = "";
+    mostrarApp();
+  });
+
+  const salir = $("#salir");
+  salir.addEventListener("click", () => {
+    if (pendientes().length && !salir.dataset.confirmar) {
+      salir.dataset.confirmar = "1"; salir.textContent = "Hay registros sin guardar. ¿Salir?";
+      setTimeout(() => { delete salir.dataset.confirmar; salir.textContent = "Cerrar sesión"; }, 4000);
+      return;
+    }
+    Sesion.borrar();
+    location.reload();
+  });
+
   /* ======================= Inicio ======================= */
-  if (!HAY_BACKEND) leerLocal();
-  pintarManual();
-  render();
-  // Precarga el lector en segundo plano para que la primera foto sea más rápida
-  setTimeout(() => { try { LectorSello.iniciar().catch(() => {}); } catch (_) {} }, 1500);
+  (async function iniciar() {
+    if (!HAY_BACKEND) { mostrarAcceso("El acceso todavía no está configurado: falta conectar el servidor (ver README)."); return; }
+    if (!Sesion.token()) { mostrarAcceso(""); return; }
+    // Confirma con el servidor que la sesión guardada sigue activa
+    $("#acc-msg").textContent = "Verificando sesión…";
+    const r = await Api.post("sesion", {});
+    if (r.status === "success") mostrarApp();
+    else if (r.status !== "sin_sesion") mostrarAcceso(r.message || "No se pudo verificar la sesión.");
+  })();
 })();

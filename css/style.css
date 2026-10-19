@@ -144,3 +144,15 @@ textarea{min-height:64px;resize:vertical}
   .barra .btn{padding:8px 10px;font-size:14px}
   .barra__cuenta{min-width:0;font-size:13px}
 }
+
+/* ---------- Acceso ---------- */
+.acceso{min-height:calc(100vh - 140px);display:grid;place-items:center;padding:32px 16px}
+.acceso__caja{width:100%;max-width:380px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:24px;display:grid;gap:14px}
+.acceso__caja h1{font:700 26px var(--f-display);margin:0;letter-spacing:.02em}
+.acceso__caja .btn{width:100%;padding:12px}
+.acceso__msg{margin:0;font-size:14px;color:var(--err);min-height:1.2em}
+.usuario{margin-left:auto;display:flex;align-items:center;gap:10px;color:#fff;font-size:14px}
+.usuario__nombre{font-weight:600}
+.usuario__salir{background:transparent;border:1px solid rgba(255,255,255,.5);color:#fff;border-radius:6px;padding:6px 10px;font-size:13px;font-weight:600;cursor:pointer}
+.usuario__salir:hover{background:rgba(255,255,255,.12)}
+@media (max-width:520px){.usuario{margin-left:0;flex-basis:100%;justify-content:space-between}}

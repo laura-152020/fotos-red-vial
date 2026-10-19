@@ -9,14 +9,23 @@
  *   GEMINI_MODEL     Opcional. Por defecto: gemini-3.8-flash
  *   ROOT_FOLDER_ID   ID de la carpeta raíz en Drive donde se guardan las fotos
  *   SPREADSHEET_ID   ID del Google Sheet que funciona como base de datos
- *   APP_TOKEN        Clave compartida con la página (la misma de config.js)
- *   ADMIN_TOKEN      Clave de administrador, necesaria para borrar (anular) registros
+ *   APP_TOKEN        Opcional. Clave compartida con la página (la misma de config.js)
+ *   ADMIN_TOKEN      Clave de administrador: anular registros y exportar a ArcGIS
+ *   SESSION_SECRET   Se crea sola la primera vez. Si la cambias o la borras, se cierran todas las sesiones.
  *
- * ACCIONES
- *   POST {accion:"leer",  token, base64, mimeType}            → datos del sello (no guarda nada)
- *   POST {accion:"subir", token, base64?, mimeType, ...campos} → guarda en Drive (si hay foto) + Sheets
- *   POST {accion:"anular", token, adminToken, id, motivo}   → marca el registro ANULADO y manda la foto a la papelera
- *   GET  ?accion=listar&token=...&formato=json|geojson|csv    → registros para ArcGIS
+ * USUARIOS (hoja "Usuarios" del mismo Sheet; se crea sola)
+ *   Para dar de alta: escribe Usuario, Nombre y una contraseña en "ContraseñaNueva", con Activo = SI.
+ *   En el primer ingreso (o al ejecutar actualizarUsuarios) la contraseña se cifra y se borra de la hoja.
+ *   Para dar de baja: Activo = NO (la sesión abierta deja de funcionar de inmediato).
+ *   Para cambiar una contraseña: escribe la nueva en "ContraseñaNueva".
+ *
+ * ACCIONES (todas, salvo "login", exigen una sesión válida en el campo "sesion")
+ *   POST {accion:"login", usuario, clave}                     → {token de sesión, nombre, expira}
+ *   POST {accion:"sesion", sesion}                            → confirma que la sesión sigue activa
+ *   POST {accion:"leer",  sesion, base64, mimeType}           → datos del sello (no guarda nada)
+ *   POST {accion:"subir", sesion, base64?, ...campos}         → guarda en Drive (si hay foto) + Sheets
+ *   POST {accion:"anular", sesion, adminToken, id, motivo}    → marca el registro ANULADO y manda la foto a la papelera
+ *   GET  ?accion=listar&admin=ADMIN_TOKEN&formato=json|geojson|csv → registros para ArcGIS
  *   GET  (sin parámetros)                                     → estado del servicio
  */
 
@@ -26,8 +35,13 @@ const COLUMNAS = [
   "Latitud", "Longitud", "CodigoVia", "NombreTramo", "Subregion", "Municipio",
   "TipoAfectacion", "Responsable", "Estado", "Observaciones", "Origen",
   "Archivo", "FileId", "URL", "OrigenUbicacion", "SelloLegible", "FueraDeAntioquia",
-  "EstadoRegistro", "FechaAnulacion", "MotivoAnulacion"
+  "EstadoRegistro", "FechaAnulacion", "MotivoAnulacion", "RegistradoPor"
 ];
+const HOJA_USUARIOS = "Usuarios";
+const COLUMNAS_USUARIOS = ["Usuario", "Nombre", "Rol", "Activo", "ContraseñaNueva", "Hash", "Sal", "UltimoIngreso"];
+const HORAS_SESION = 8;
+const INTENTOS_MAX = 5;          // intentos fallidos antes de bloquear
+const MINUTOS_BLOQUEO = 15;
 const RESPONSABLES = ["Gobernación", "Rental", "Alcaldía", "Ciudadanía"];
 const TIPOS_AFECTACION = ["Derrumbe", "Deslizamiento / movimiento en masa", "Pérdida de banca", "Hundimiento de la vía",
   "Socavación", "Caída de rocas", "Obstrucción de drenaje o alcantarilla", "Daño en puente o pontón",
@@ -39,9 +53,11 @@ const ANTIOQUIA = { latMin: 5.40, latMax: 8.90, lonMin: -77.15, lonMax: -73.85 }
 
 function doGet(e) {
   const p = (e && e.parameter) || {};
-  if (!p.accion) return json_({ status: "online", servicio: "Fotos Red Vial Antioquia", version: "2.0.0" });
+  if (!p.accion) return json_({ status: "online", servicio: "VIP-C", version: "4.0.0" });
   try {
-    validarToken_(p.token);
+    // Exportación (ArcGIS): con la clave de administrador o con una sesión válida
+    const admin = prop_("ADMIN_TOKEN", true);
+    if (!(admin && p.admin === admin)) validarSesion_(p.sesion);
     if (p.accion === "listar") {
       const registros = listarRegistros_();
       if (p.formato === "csv") return ContentService.createTextOutput(aCSV_(registros)).setMimeType(ContentService.MimeType.CSV);
@@ -59,13 +75,142 @@ function doPost(e) {
     if (!e || !e.postData || !e.postData.contents) throw new Error("Solicitud vacía.");
     const payload = JSON.parse(e.postData.contents);
     validarToken_(payload.token);
+    if (payload.accion === "login") return json_(login_(payload));
+    const usuario = validarSesion_(payload.sesion);
+    if (payload.accion === "sesion") return json_({ status: "success", usuario: usuario.usuario, nombre: usuario.nombre, rol: usuario.rol });
     if (payload.accion === "leer") return json_(leerSello_(payload));
-    if (payload.accion === "subir") return json_(subirFoto_(payload));
+    if (payload.accion === "subir") { payload.registradoPor = usuario.usuario; return json_(subirFoto_(payload)); }
     if (payload.accion === "anular") return json_(anularRegistro_(payload));
     throw new Error("Acción no reconocida.");
   } catch (err) {
-    return json_({ status: "error", message: err.message || String(err) });
+    return json_({ status: err.sinSesion ? "sin_sesion" : "error", message: err.message || String(err) });
   }
+}
+
+/* ======================= Usuarios y sesiones ======================= */
+
+function hojaUsuarios_() {
+  const ss = SpreadsheetApp.openById(prop_("SPREADSHEET_ID"));
+  let h = ss.getSheetByName(HOJA_USUARIOS);
+  if (!h) h = ss.insertSheet(HOJA_USUARIOS);
+  if (h.getLastRow() === 0) {
+    h.appendRow(COLUMNAS_USUARIOS);
+    h.getRange(1, 1, 1, COLUMNAS_USUARIOS.length).setFontWeight("bold");
+    h.setFrozenRows(1);
+  }
+  return h;
+}
+
+function leerUsuarios_() {
+  const h = hojaUsuarios_();
+  const datos = h.getDataRange().getValues();
+  const enc = datos[0];
+  const col = {}; enc.forEach(function (c, i) { col[c] = i; });
+  return { h: h, col: col, filas: datos.slice(1).map(function (f, i) { return { fila: i + 2, v: f }; }) };
+}
+
+function cifrar_(clave, sal) {
+  // SHA-256 con sal, 2000 rondas
+  let d = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, sal + "|" + clave, Utilities.Charset.UTF_8);
+  for (let i = 0; i < 2000; i++) d = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, d.concat(Utilities.newBlob(sal).getBytes()));
+  return Utilities.base64Encode(d);
+}
+
+// Cifra las contraseñas escritas en "ContraseñaNueva" y las borra de la hoja.
+function actualizarUsuarios() {
+  const u = leerUsuarios_();
+  let n = 0;
+  u.filas.forEach(function (r) {
+    const nueva = texto_(r.v[u.col["ContraseñaNueva"]]);
+    if (!nueva) return;
+    const sal = Utilities.getUuid();
+    u.h.getRange(r.fila, u.col["Hash"] + 1).setValue(cifrar_(nueva, sal));
+    u.h.getRange(r.fila, u.col["Sal"] + 1).setValue(sal);
+    u.h.getRange(r.fila, u.col["ContraseñaNueva"] + 1).setValue("");
+    if (!texto_(r.v[u.col["Activo"]])) u.h.getRange(r.fila, u.col["Activo"] + 1).setValue("SI");
+    n++;
+  });
+  Logger.log(n + " contraseña(s) cifradas.");
+  return n;
+}
+
+function buscarUsuario_(usuario) {
+  const u = leerUsuarios_();
+  const k = texto_(usuario).toLowerCase();
+  for (let i = 0; i < u.filas.length; i++) {
+    const r = u.filas[i];
+    if (texto_(r.v[u.col["Usuario"]]).toLowerCase() === k && k) {
+      return {
+        u: u, fila: r.fila, usuario: texto_(r.v[u.col["Usuario"]]), nombre: texto_(r.v[u.col["Nombre"]]),
+        rol: texto_(r.v[u.col["Rol"]]) || "usuario", activo: texto_(r.v[u.col["Activo"]]).toUpperCase() === "SI",
+        nueva: texto_(r.v[u.col["ContraseñaNueva"]]), hash: texto_(r.v[u.col["Hash"]]), sal: texto_(r.v[u.col["Sal"]])
+      };
+    }
+  }
+  return null;
+}
+
+function login_(p) {
+  const usuario = texto_(p.usuario), clave = String(p.clave || "");
+  if (!usuario || !clave) return { status: "error", message: "Escribe tu usuario y tu contraseña." };
+
+  const cache = CacheService.getScriptCache();
+  const kFallos = "fallos_" + usuario.toLowerCase();
+  const fallos = Number(cache.get(kFallos) || 0);
+  if (fallos >= INTENTOS_MAX) return { status: "error", message: "Demasiados intentos fallidos. Espera " + MINUTOS_BLOQUEO + " minutos e intenta de nuevo." };
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  let u;
+  try {
+    u = buscarUsuario_(usuario);
+    if (u && u.nueva) { actualizarUsuarios(); u = buscarUsuario_(usuario); } // contraseña recién asignada
+  } finally { lock.releaseLock(); }
+
+  const ok = u && u.activo && u.hash && u.sal && cifrar_(clave, u.sal) === u.hash;
+  if (!ok) {
+    cache.put(kFallos, String(fallos + 1), MINUTOS_BLOQUEO * 60);
+    return { status: "error", message: "Usuario o contraseña incorrectos." };
+  }
+  cache.remove(kFallos);
+  u.u.h.getRange(u.fila, u.u.col["UltimoIngreso"] + 1).setValue(Utilities.formatDate(new Date(), "America/Bogota", "yyyy-MM-dd HH:mm:ss"));
+  const expira = Date.now() + HORAS_SESION * 3600 * 1000;
+  return { status: "success", sesion: firmarSesion_({ u: u.usuario, exp: expira }), usuario: u.usuario, nombre: u.nombre || u.usuario, rol: u.rol, expira: expira };
+}
+
+function secreto_() {
+  const props = PropertiesService.getScriptProperties();
+  let s = props.getProperty("SESSION_SECRET");
+  if (!s) { s = Utilities.getUuid() + Utilities.getUuid(); props.setProperty("SESSION_SECRET", s); }
+  return s;
+}
+
+function b64url_(bytesOrText) {
+  const b = typeof bytesOrText === "string" ? Utilities.base64EncodeWebSafe(bytesOrText, Utilities.Charset.UTF_8) : Utilities.base64EncodeWebSafe(bytesOrText);
+  return b.replace(/=+$/, "");
+}
+
+function firmarSesion_(datos) {
+  const cuerpo = b64url_(JSON.stringify(datos));
+  const firma = b64url_(Utilities.computeHmacSha256Signature(cuerpo, secreto_()));
+  return cuerpo + "." + firma;
+}
+
+function errorSesion_(msg) { const e = new Error(msg); e.sinSesion = true; return e; }
+
+// Devuelve el usuario de una sesión válida o lanza error "sin_sesion"
+function validarSesion_(token) {
+  const partes = String(token || "").split(".");
+  if (partes.length !== 2) throw errorSesion_("Inicia sesión para continuar.");
+  const esperada = b64url_(Utilities.computeHmacSha256Signature(partes[0], secreto_()));
+  if (esperada !== partes[1]) throw errorSesion_("Sesión no válida. Inicia sesión de nuevo.");
+  let datos;
+  try { datos = JSON.parse(Utilities.newBlob(Utilities.base64DecodeWebSafe(partes[0] + "===".slice((partes[0].length + 3) % 4))).getDataAsString()); }
+  catch (_) { throw errorSesion_("Sesión no válida. Inicia sesión de nuevo."); }
+  if (!datos.exp || Date.now() > datos.exp) throw errorSesion_("Tu sesión venció. Inicia sesión de nuevo.");
+  const u = buscarUsuario_(datos.u);
+  if (!u || !u.activo) throw errorSesion_("Tu usuario no está activo. Habla con el administrador.");
+  return u;
 }
 
 /* ======================= Lectura del sello (Gemini) ======================= */
@@ -182,7 +327,7 @@ function subirFoto_(p) {
       archivo ? archivo.getName() : "", archivo ? archivo.getId() : "", archivo ? archivo.getUrl() : "",
       texto_(p.origenUbicacion) || "manual", p.selloLegible ? "SI" : "NO",
       fueraDeAntioquia_(lat, lon) ? "SI" : "NO",
-      "ACTIVO", "", ""
+      "ACTIVO", "", "", texto_(p.registradoPor)
     ]);
     return { status: "success", id: id, fileId: archivo ? archivo.getId() : "", url: archivo ? archivo.getUrl() : "" };
   } catch (err) {
@@ -321,5 +466,8 @@ function probarConfiguracion() {
   ["GEMINI_API_KEY", "ROOT_FOLDER_ID", "SPREADSHEET_ID"].forEach(function (k) { prop_(k); });
   DriveApp.getFolderById(prop_("ROOT_FOLDER_ID")).getName();
   hoja_();
-  Logger.log("Configuración correcta. Modelo: " + (prop_("GEMINI_MODEL", true) || "gemini-3.8-flash"));
+  hojaUsuarios_();
+  secreto_();
+  Logger.log("Configuración correcta. Modelo: " + (prop_("GEMINI_MODEL", true) || "gemini-3.8-flash") +
+    ". Ahora agrega usuarios en la hoja «Usuarios» del Sheet.");
 }
