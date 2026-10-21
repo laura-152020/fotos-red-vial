@@ -1,5 +1,5 @@
 /**
- * VIP-C · Visor interactivo de puntos críticos — Backend v4.3 (Google Apps Script)
+ * VIP-C · Visor interactivo de puntos críticos — Backend v4.6 (Google Apps Script)
  * ----------------------------------------------------------
  * Un solo archivo. Guarda fotos en Drive, lee el sello de la foto con Gemini
  * y registra cada punto (con o sin foto) en Google Sheets. Expone los datos para ArcGIS.
@@ -22,10 +22,15 @@
  *   Para cambiar una contraseña: escribe la nueva en "ContraseñaNueva".
  *   Registro propio (botón «Crear cuenta»): correos @antioquia.gov.co o de un dominio de la hoja «EmpresasAutorizadas»
  *   → Activo = VERIFICAR hasta confirmar el código que llega al correo (luego SI, automático).
- *   Cualquier otro correo → Activo = PENDIENTE; el administrador escribe SI para aprobar o NO para rechazar.
+ *   Correos personales (gmail, hotmail, outlook, yahoo…) → registro RECHAZADO de inmediato.
+ *   Correo de una empresa que no está en la lista → la persona indica a su supervisor (@antioquia.gov.co); tras confirmar su correo,
+ *   al supervisor le llega un correo con botones: aprobar a la persona, aprobar a toda la empresa (12 meses) o rechazar.
+ *   Al vencer la empresa, se le pide la renovación al supervisor con otro botón. El administrador no interviene.
  *
  * EMPRESAS AUTORIZADAS (hoja «EmpresasAutorizadas»; se crea sola)
- *   Dominio (ej. consorciovial.com) · Empresa · Activo (SI/NO) · Notas. Los correos personales (gmail, hotmail…) nunca se autorizan por dominio.
+ *   Dominio (ej. consorciovial.com) · Empresa · Activo (SI/NO) · Vence (fecha de fin del contrato, opcional) · Notas.
+ *   Al vencer o al poner NO, todos los usuarios de esa empresa pierden el acceso automáticamente (también las sesiones abiertas).
+ *   Los correos personales (gmail, hotmail…) nunca se autorizan por dominio.
  *
  * ACCIONES (todas, salvo "login", exigen una sesión válida en el campo "sesion")
  *   POST {accion:"login", usuario, clave}                     → {token de sesión, nombre, expira}
@@ -48,11 +53,15 @@ const COLUMNAS = [
   "EstadoRegistro", "FechaAnulacion", "MotivoAnulacion", "RegistradoPor"
 ];
 const HOJA_USUARIOS = "Usuarios";
-const COLUMNAS_USUARIOS = ["Usuario", "Nombre", "Rol", "Activo", "ContraseñaNueva", "Hash", "Sal", "UltimoIngreso", "Correo", "Entidad", "Empresa", "FechaSolicitud"];
+const COLUMNAS_USUARIOS = ["Usuario", "Nombre", "Rol", "Activo", "ContraseñaNueva", "Hash", "Sal", "UltimoIngreso", "Correo", "Entidad", "Empresa", "Supervisor", "FechaSolicitud"];
 const ENTIDADES = ["Gobernación de Antioquia", "Empresa externa"];
 const HOJA_EMPRESAS = "EmpresasAutorizadas";
-const COLUMNAS_EMPRESAS = ["Dominio", "Empresa", "Activo", "Notas"];
-const DOMINIOS_PERSONALES = ["gmail.com", "hotmail.com", "outlook.com", "live.com", "yahoo.com", "yahoo.es", "icloud.com", "msn.com", "hotmail.es", "outlook.es", "protonmail.com", "aol.com"];
+const COLUMNAS_EMPRESAS = ["Dominio", "Empresa", "Activo", "Vence", "AutorizadaPor", "Notas"];
+const MESES_EMPRESA = 12;        // cuánto dura la autorización de una empresa aprobada por un supervisor
+const DIAS_ENLACE = 7;           // vigencia de los botones del correo al supervisor
+const DOMINIOS_PERSONALES = ["gmail.com", "googlemail.com", "hotmail.com", "hotmail.es", "hotmail.co", "outlook.com", "outlook.es", "live.com", "live.com.co",
+  "msn.com", "yahoo.com", "yahoo.es", "yahoo.com.co", "ymail.com", "icloud.com", "me.com", "mac.com", "protonmail.com", "proton.me",
+  "aol.com", "gmx.com", "zoho.com", "mail.com", "yandex.com", "une.net.co", "etb.net.co", "tutanota.com"];
 const MINUTOS_CODIGO = 30;       // vigencia del código de verificación enviado al correo
 const HORAS_SESION = 8;
 const INTENTOS_MAX = 5;          // intentos fallidos antes de bloquear
@@ -68,7 +77,8 @@ const ANTIOQUIA = { latMin: 5.40, latMax: 8.90, lonMin: -77.15, lonMax: -73.85 }
 
 function doGet(e) {
   const p = (e && e.parameter) || {};
-  if (!p.accion) return json_({ status: "online", servicio: "VIP-C", version: "4.3.0" });
+  if (!p.accion) return json_({ status: "online", servicio: "VIP-C", version: "4.6.0" });
+  if (p.accion === "decidir") return decidir_(p.t);
   try {
     // Exportación (ArcGIS): con la clave de administrador o con una sesión válida
     const admin = prop_("ADMIN_TOKEN", true);
@@ -127,7 +137,7 @@ const ALIAS_USUARIOS = {
   usuario: "Usuario", user: "Usuario", nombre: "Nombre", rol: "Rol", activo: "Activo",
   contrasenanueva: "ContraseñaNueva", contrasena: "ContraseñaNueva", clave: "ContraseñaNueva", clavenueva: "ContraseñaNueva", password: "ContraseñaNueva",
   hash: "Hash", sal: "Sal", ultimoingreso: "UltimoIngreso",
-  correo: "Correo", email: "Correo", correoelectronico: "Correo", entidad: "Entidad", fechasolicitud: "FechaSolicitud", empresa: "Empresa"
+  correo: "Correo", email: "Correo", correoelectronico: "Correo", entidad: "Entidad", fechasolicitud: "FechaSolicitud", empresa: "Empresa", supervisor: "Supervisor"
 };
 
 function leerUsuarios_() {
@@ -187,6 +197,7 @@ function buscarUsuario_(usuario) {
     return {
       u: u, fila: r.fila, usuario: texto_(r.t[u.col["Usuario"]]), nombre: texto_(r.t[u.col["Nombre"]]),
       rol: texto_(r.t[u.col["Rol"]]) || "usuario", correo: texto_(r.t[u.col["Correo"]]),
+      empresa: texto_(r.t[u.col["Empresa"]]), supervisor: texto_(r.t[u.col["Supervisor"]]).toLowerCase(),
       activo: ["SI", "SÍ", "S", "TRUE", "VERDADERO", "1", "X"].indexOf(normUsuario_(r.t[u.col["Activo"]]).toUpperCase()) >= 0,
       estado: normUsuario_(r.t[u.col["Activo"]]).toUpperCase(),
       nueva: String(r.t[u.col["ContraseñaNueva"]] || "").trim(), hash: texto_(r.t[u.col["Hash"]]), sal: texto_(r.t[u.col["Sal"]])
@@ -224,9 +235,13 @@ function login_(p) {
   // La contraseña es correcta: ahora sí se puede decir en qué estado está la cuenta
   if (!u.activo) {
     if (u.estado === "VERIFICAR") return { status: "verificar", usuario: u.usuario, correo: ocultarCorreo_(u.correo), message: "Confirma tu correo con el código que te enviamos." };
-    if (u.estado === "PENDIENTE") return { status: "error", message: "Tu solicitud está pendiente de aprobación. Podrás ingresar cuando un administrador la active." };
+    if (u.estado === "PENDIENTE") return { status: "error", message: u.supervisor
+      ? "Tu supervisor (" + ocultarCorreo_(u.supervisor) + ") aún no ha aprobado tu acceso. Recibió un correo con un botón para aprobarlo."
+      : "Tu solicitud está pendiente de aprobación. Podrás ingresar cuando un administrador la active." };
     return { status: "error", message: "Tu cuenta no está activa. Habla con el administrador." };
   }
+  const bloqueo = bloqueoPorEmpresa_(u);
+  if (bloqueo) return { status: "error", message: bloqueo };
   u.u.h.getRange(u.fila, u.u.col["UltimoIngreso"] + 1).setValue(Utilities.formatDate(new Date(), "America/Bogota", "yyyy-MM-dd HH:mm:ss"));
   const expira = Date.now() + HORAS_SESION * 3600 * 1000;
   return { status: "success", sesion: firmarSesion_({ u: u.usuario, exp: expira }), usuario: u.usuario, nombre: u.nombre || u.usuario, rol: u.rol, expira: expira };
@@ -234,7 +249,7 @@ function login_(p) {
 
 /* ======================= Registro de usuarios ======================= */
 // Correos de la Gobernación o de una empresa autorizada: se activan al confirmar un código enviado al correo.
-// Cualquier otro correo (empresa no autorizada, correo personal): queda PENDIENTE hasta que un administrador escriba SI.
+// Correo personal: rechazado. Empresa no autorizada: queda PENDIENTE hasta que un administrador escriba SI.
 
 function dominioInstitucional_() { return (prop_("DOMINIO_INSTITUCIONAL", true) || "antioquia.gov.co").toLowerCase().replace(/^@/, ""); }
 function correoAdmin_() { return prop_("ADMIN_EMAIL", true) || Session.getEffectiveUser().getEmail(); }
@@ -253,17 +268,65 @@ function hojaEmpresas_() {
     h.appendRow(COLUMNAS_EMPRESAS);
     h.getRange(1, 1, 1, COLUMNAS_EMPRESAS.length).setFontWeight("bold");
     h.setFrozenRows(1);
+  } else {
+    // Hoja de una versión anterior: agrega la columna Vence (u otras) si falta
+    const enc = h.getRange(1, 1, 1, Math.max(h.getLastColumn(), 1)).getValues()[0].map(claveEncabezado_);
+    COLUMNAS_EMPRESAS.forEach(function (c) {
+      if (enc.indexOf(claveEncabezado_(c)) < 0) { h.getRange(1, enc.length + 1).setValue(c).setFontWeight("bold"); enc.push(claveEncabezado_(c)); }
+    });
   }
   return h;
 }
-// Devuelve el nombre de la empresa si el dominio del correo está autorizado (Activo = SI); si no, ""
-function empresaAutorizada_(correo) {
-  const datos = hojaEmpresas_().getDataRange().getDisplayValues();
-  for (let i = 1; i < datos.length; i++) {
-    const dom = texto_(datos[i][0]), emp = texto_(datos[i][1]), act = normUsuario_(datos[i][2]).toUpperCase();
-    if (dom && ["SI", "SÍ", "S", "X", "1", "TRUE", "VERDADERO"].indexOf(act) >= 0 && !esPersonal_("x@" + dom.replace(/^@/, "")) && terminaEnDominio_(correo, dom)) return emp || dom;
+
+// Fecha de la columna Vence: acepta fecha de Sheets, AAAA-MM-DD o DD/MM/AAAA. Vacía = sin vencimiento.
+function fechaVence_(valor, texto) {
+  if (valor instanceof Date && !isNaN(valor)) return valor;
+  const t = String(texto || valor || "").trim();
+  let m = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  m = t.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})/);
+  if (m) return new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]));
+  return null;
+}
+
+// Estado de la empresa a la que pertenece un correo, según la hoja EmpresasAutorizadas.
+// { listada: el dominio aparece en la hoja, vigente: Activo = SI y no ha vencido, empresa: nombre }
+function estadoEmpresa_(correo) {
+  const h = hojaEmpresas_();
+  const r = h.getDataRange(), vals = r.getValues(), txt = r.getDisplayValues();
+  const col = {}; vals[0].forEach(function (c, i) { col[claveEncabezado_(c)] = i; });
+  const iDom = col["dominio"], iEmp = col["empresa"], iAct = col["activo"], iVen = col["vence"], iAut = col["autorizadapor"];
+  const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+  let listada = null;
+  for (let i = 1; i < vals.length; i++) {
+    const dom = texto_(txt[i][iDom]);
+    if (!dom || esPersonal_("x@" + dom.replace(/^@/, "")) || !terminaEnDominio_(correo, dom)) continue;
+    const activo = ["SI", "SÍ", "S", "X", "1", "TRUE", "VERDADERO"].indexOf(normUsuario_(txt[i][iAct]).toUpperCase()) >= 0;
+    const vence = iVen === undefined ? null : fechaVence_(vals[i][iVen], txt[i][iVen]);
+    const vigente = activo && (!vence || vence >= hoy); // vigente hasta el final del día de vencimiento
+    const e = { listada: true, vigente: vigente, empresa: texto_(txt[i][iEmp]) || dom, dominio: dom.replace(/^@/, "").toLowerCase(),
+      autorizadaPor: iAut === undefined ? "" : texto_(txt[i][iAut]).toLowerCase() };
+    if (vigente) return e;
+    listada = listada || e;
   }
-  return "";
+  return listada || { listada: false, vigente: false, empresa: "" };
+}
+// Devuelve el nombre de la empresa si el dominio del correo está autorizado y vigente; si no, ""
+function empresaAutorizada_(correo) { const e = estadoEmpresa_(correo); return e.vigente ? e.empresa : ""; }
+
+// Si el usuario es de una empresa listada cuyo acceso venció o se desactivó, devuelve el mensaje de bloqueo
+function bloqueoPorEmpresa_(u) {
+  if (!u || !u.correo || esInstitucional_(u.correo)) return "";
+  const e = estadoEmpresa_(u.correo);
+  if (!e.listada || e.vigente) return "";
+  // Pide la renovación al supervisor que autorizó la empresa (máximo un correo al día por empresa)
+  const sup = esInstitucional_(e.autorizadaPor) ? e.autorizadaPor : (esInstitucional_(u.supervisor) ? u.supervisor : "");
+  if (sup) {
+    const cache = CacheService.getScriptCache(), k = "renov_" + e.dominio;
+    if (!cache.get(k)) { cache.put(k, "1", 86400); try { pedirRenovacion_(e, sup, u); } catch (_) {} }
+    return "El acceso de " + e.empresa + " a VIP-C venció. Le enviamos a " + ocultarCorreo_(sup) + " un correo para renovarlo.";
+  }
+  return "El acceso de " + e.empresa + " a VIP-C venció o fue desactivado. Habla con tu supervisor en la Gobernación.";
 }
 // Quién puede activarse solo con el código del correo
 function puedeAutoactivarse_(correo) { return esInstitucional_(correo) || !!empresaAutorizada_(correo); }
@@ -272,6 +335,7 @@ function ocultarCorreo_(c) { c = String(c || ""); const i = c.indexOf("@"); retu
 function registro_(p) {
   const nombre = texto_(p.nombre), correo = texto_(p.correo).toLowerCase(), entidad = texto_(p.entidad), empresa = texto_(p.empresa);
   const usuario = texto_(p.usuario).toLowerCase(), clave = String(p.clave || "");
+  const supervisor = texto_(p.supervisor).toLowerCase();
   const faltan = [];
   if (nombre.length < 5) faltan.push("tu nombre completo");
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(correo)) faltan.push("un correo válido");
@@ -282,14 +346,24 @@ function registro_(p) {
   if (clave.length < 8 || !/[a-zA-Z]/.test(clave) || !/\d/.test(clave)) faltan.push("una contraseña de al menos 8 caracteres con letras y números");
   if (faltan.length) return { status: "error", message: "Revisa: " + faltan.join("; ") + "." };
 
+  // Restricción: los correos personales no pueden registrarse (solo Gobernación y empresas)
+  if (esPersonal_(correo)) {
+    return { status: "error", bloqueado: true, message: "VIP-C es solo para personal de la Gobernación de Antioquia y empresas autorizadas. Regístrate con tu correo institucional o el de tu empresa (no se aceptan Gmail, Hotmail, Outlook, Yahoo ni similares)." };
+  }
+
   // Freno contra registros masivos: máximo 30 por hora
   const cache = CacheService.getScriptCache();
   const n = Number(cache.get("registros_hora") || 0);
   if (n >= 30) return { status: "error", message: "Hay muchas solicitudes en este momento. Intenta de nuevo en una hora." };
 
   const institucional = esInstitucional_(correo);
-  const empresaOk = !institucional && entidad === "Empresa externa" ? empresaAutorizada_(correo) : "";
+  const empresaOk = !institucional ? empresaAutorizada_(correo) : "";
   const autoactiva = institucional || !!empresaOk;
+  const manual = !autoactiva && permiteSolicitudes_(); // modo antiguo: aprueba el administrador
+  if (!autoactiva && !manual) {
+    if (!supervisor) return { status: "error", necesitaSupervisor: true, message: "La empresa @" + correo.split("@")[1] + " aún no está autorizada. Escribe el correo de tu supervisor en la Gobernación (@" + dominioInstitucional_() + ") para que apruebe tu acceso." };
+    if (!esInstitucional_(supervisor) || !/^[^\s@]+@[^\s@]+$/.test(supervisor)) return { status: "error", necesitaSupervisor: true, message: "El supervisor debe tener correo @" + dominioInstitucional_() + "." };
+  }
   const lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
@@ -302,21 +376,29 @@ function registro_(p) {
     const sal = Utilities.getUuid();
     const fila = u.h.getLastRow() + 1;
     const valores = {
-      Usuario: usuario, Nombre: nombre, Rol: "usuario", Activo: autoactiva ? "VERIFICAR" : "PENDIENTE",
-      Hash: cifrar_(clave, sal), Sal: sal, Correo: correo, Entidad: institucional ? "Gobernación de Antioquia" : entidad,
-      Empresa: institucional ? "" : (empresaOk || empresa),
+      Usuario: usuario, Nombre: nombre, Rol: "usuario", Activo: manual ? "PENDIENTE" : "VERIFICAR",
+      Hash: cifrar_(clave, sal), Sal: sal, Correo: correo, Entidad: institucional ? "Gobernación de Antioquia" : "Empresa externa",
+      Empresa: institucional ? "" : (empresaOk || empresa), Supervisor: autoactiva ? "" : supervisor,
       FechaSolicitud: Utilities.formatDate(new Date(), "America/Bogota", "yyyy-MM-dd HH:mm:ss")
     };
     Object.keys(valores).forEach(function (k) { if (u.col[k] !== undefined) escribirTexto_(u.h, fila, u.col[k] + 1, valores[k]); });
   } finally { lock.releaseLock(); }
   cache.put("registros_hora", String(n + 1), 3600);
 
-  if (autoactiva) {
+  if (!manual) {
+    // Gobernación, empresa autorizada o externo con supervisor: primero confirma su correo con el código
     enviarCodigo_(usuario, correo, nombre);
     return { status: "verificar", usuario: usuario, correo: ocultarCorreo_(correo), message: "Te enviamos un código a tu correo." };
   }
   avisarAdmin_(nombre, correo, entidad, usuario, empresa);
   return { status: "pendiente", message: "Solicitud enviada. Un administrador debe aprobarla; podrás ingresar cuando la active." };
+}
+
+// Por defecto no hay solicitudes manuales: solo Gobernación y empresas autorizadas.
+// Para volver a recibir solicitudes de empresas no listadas, crea la propiedad PERMITIR_SOLICITUDES = SI.
+function permiteSolicitudes_() { return String(prop_("PERMITIR_SOLICITUDES", true) || "").toUpperCase() === "SI"; }
+function noAutorizado_(correo) {
+  return { status: "error", bloqueado: true, message: "El correo @" + correo.split("@")[1] + " no está autorizado para VIP-C. Si tu empresa tiene contrato con la Gobernación de Antioquia, pide a tu supervisor que la autorice." };
 }
 
 function enviarCodigo_(usuario, correo, nombre) {
@@ -363,10 +445,19 @@ function verificar_(p) {
   try {
     const u = buscarUsuario_(usuario);
     if (!u || u.estado !== "VERIFICAR") return { status: "error", message: "Esta cuenta no está esperando verificación." };
-    u.u.h.getRange(u.fila, u.u.col["Activo"] + 1).setValue("SI");
+    cache.remove("verif_" + usuario);
+    if (puedeAutoactivarse_(u.correo)) {
+      u.u.h.getRange(u.fila, u.u.col["Activo"] + 1).setValue("SI");
+      return { status: "success", message: "Correo confirmado. Ya puedes ingresar." };
+    }
+    u.u.h.getRange(u.fila, u.u.col["Activo"] + 1).setValue("PENDIENTE");
+    if (u.supervisor) {
+      pedirAprobacion_(u);
+      return { status: "pendiente_supervisor", supervisor: ocultarCorreo_(u.supervisor),
+        message: "Correo confirmado. Le enviamos a tu supervisor (" + ocultarCorreo_(u.supervisor) + ") un correo para aprobar tu acceso. Te avisaremos por correo cuando lo haga." };
+    }
+    return { status: "pendiente", message: "Correo confirmado. Tu solicitud queda pendiente de aprobación." };
   } finally { lock.releaseLock(); }
-  cache.remove("verif_" + usuario);
-  return { status: "success", message: "Correo confirmado. Ya puedes ingresar." };
 }
 
 function reenviarCodigo_(p) {
@@ -378,6 +469,135 @@ function reenviarCodigo_(p) {
   cache.put("reenvio_" + usuario, "1", 60);
   enviarCodigo_(u.usuario, u.correo, u.nombre);
   return { status: "success", correo: ocultarCorreo_(u.correo), message: "Te enviamos un código nuevo." };
+}
+
+/* ======================= Aprobación por el supervisor (un clic en el correo) ======================= */
+
+function urlServicio_() {
+  const p = prop_("WEBAPP_URL", true);
+  if (p) return p;
+  try { return ScriptApp.getService().getUrl(); } catch (_) { return ""; }
+}
+function enlace_(datos) {
+  datos.k = "d"; datos.exp = Date.now() + DIAS_ENLACE * 86400000;
+  return urlServicio_() + "?accion=decidir&t=" + encodeURIComponent(firmarSesion_(datos));
+}
+function boton_(texto, url, color) {
+  return '<a href="' + url + '" style="display:inline-block;margin:6px 8px 6px 0;padding:12px 18px;border-radius:6px;background:' + color +
+    ';color:#fff;text-decoration:none;font:600 15px Arial,sans-serif">' + texto + '</a>';
+}
+function esc_(t) { return String(t || "").replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+
+function pedirAprobacion_(u) {
+  const dom = u.correo.split("@")[1];
+  const base = { u: u.usuario, sup: u.supervisor };
+  const html = '<div style="font:15px/1.5 Arial,sans-serif;color:#1b231e;max-width:560px">' +
+    '<h2 style="margin:0 0 8px">Solicitud de acceso a VIP-C</h2>' +
+    '<p><b>' + esc_(u.nombre) + '</b> (' + esc_(u.correo) + '), de <b>' + esc_(u.empresa || dom) + '</b>, pide acceso a VIP-C – Visor interactivo de puntos críticos, y te indicó como su supervisor en la Gobernación.</p>' +
+    '<p>Su correo ya fue verificado. ¿Qué deseas hacer?</p>' +
+    boton_("Aprobar a esta persona", enlace_(Object.assign({ d: "persona" }, base)), "#0b7a3e") +
+    boton_("Aprobar a toda la empresa (" + MESES_EMPRESA + " meses)", enlace_(Object.assign({ d: "empresa" }, base)), "#1c4220") +
+    boton_("Rechazar", enlace_(Object.assign({ d: "rechazar" }, base)), "#b3261e") +
+    '<p style="color:#5b675f;font-size:13px">«Toda la empresa» autoriza a cualquier persona con correo @' + esc_(dom) + ' durante ' + MESES_EMPRESA +
+    ' meses; al vencer te pediremos renovarlo. Los botones funcionan durante ' + DIAS_ENLACE + ' días. Si no conoces a esta persona, toca Rechazar.</p>' +
+    '<p style="color:#5b675f;font-size:13px">Gobernación de Antioquia · Secretaría de Infraestructura Física</p></div>';
+  MailApp.sendEmail({ to: u.supervisor, subject: "VIP-C · " + u.nombre + " (" + (u.empresa || dom) + ") pide acceso", htmlBody: html,
+    body: u.nombre + " (" + u.correo + ") pide acceso a VIP-C. Abre este correo en un programa que muestre HTML para aprobar o rechazar." });
+}
+
+function pedirRenovacion_(e, sup, u) {
+  const html = '<div style="font:15px/1.5 Arial,sans-serif;color:#1b231e;max-width:560px">' +
+    '<h2 style="margin:0 0 8px">Renovar acceso de ' + esc_(e.empresa) + ' a VIP-C</h2>' +
+    '<p>La autorización de <b>' + esc_(e.empresa) + '</b> (@' + esc_(e.dominio) + ') venció. ' + esc_(u.nombre) + ' intentó ingresar y no pudo.</p>' +
+    boton_("Renovar " + MESES_EMPRESA + " meses", enlace_({ d: "renovar", dom: e.dominio, sup: sup }), "#0b7a3e") +
+    '<p style="color:#5b675f;font-size:13px">Si el contrato terminó, no hagas nada: el acceso seguirá cerrado.</p></div>';
+  MailApp.sendEmail({ to: sup, subject: "VIP-C · Renovar acceso de " + e.empresa, htmlBody: html, body: "La autorización de " + e.empresa + " en VIP-C venció." });
+}
+
+// Agrega o renueva una empresa en EmpresasAutorizadas
+function autorizarEmpresa_(dominio, nombre, sup) {
+  const h = hojaEmpresas_();
+  const datos = h.getDataRange().getDisplayValues();
+  const col = {}; datos[0].forEach(function (c, i) { col[claveEncabezado_(c)] = i + 1; });
+  const vence = new Date(); vence.setHours(0, 0, 0, 0); vence.setMonth(vence.getMonth() + MESES_EMPRESA);
+  let fila = -1;
+  for (let i = 1; i < datos.length; i++) if (texto_(datos[i][col["dominio"] - 1]).replace(/^@/, "").toLowerCase() === dominio) { fila = i + 1; break; }
+  if (fila < 0) {
+    fila = h.getLastRow() + 1;
+    escribirTexto_(h, fila, col["dominio"], dominio);
+    escribirTexto_(h, fila, col["empresa"], nombre || dominio);
+  }
+  h.getRange(fila, col["activo"]).setValue("SI");
+  h.getRange(fila, col["vence"]).setValue(vence);
+  if (col["autorizadapor"]) h.getRange(fila, col["autorizadapor"]).setValue(sup);
+  if (col["notas"]) h.getRange(fila, col["notas"]).setValue("Autorizada por " + sup + " el " + Utilities.formatDate(new Date(), "America/Bogota", "yyyy-MM-dd"));
+  return vence;
+}
+
+function avisarUsuario_(u, aprobado) {
+  try {
+    MailApp.sendEmail({ to: u.correo, subject: aprobado ? "VIP-C · Tu acceso fue aprobado" : "VIP-C · Tu solicitud de acceso no fue aprobada",
+      body: "Hola " + u.nombre + ",\n\n" + (aprobado
+        ? "Tu supervisor aprobó tu acceso a VIP-C. Ya puedes ingresar con tu usuario (" + u.usuario + ") y tu contraseña."
+        : "Tu supervisor no aprobó tu acceso a VIP-C. Si crees que es un error, comunícate con él.") +
+        "\n\nGobernación de Antioquia · Secretaría de Infraestructura Física" });
+  } catch (_) {}
+}
+
+function paginaResultado_(titulo, texto, ok) {
+  const html = '<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><body style="margin:0;font:16px/1.5 Arial,sans-serif;background:#f2f4f1;color:#1b231e">' +
+    '<div style="background:#081c15;color:#fff;padding:16px 20px;font:700 22px Arial">VIP-C <span style="font-weight:400;font-size:13px;letter-spacing:.08em">VISOR INTERACTIVO DE PUNTOS CRÍTICOS</span></div>' +
+    '<div style="height:5px;background:#f2b705"></div>' +
+    '<div style="padding:0 16px"><div style="max-width:520px;margin:32px auto;padding:24px;background:#fff;border:1px solid #d7dcd5;border-radius:10px">' +
+    '<h1 style="margin:0 0 8px;font-size:22px;color:' + (ok ? "#0b7a3e" : "#b3261e") + '">' + esc_(titulo) + '</h1><p style="margin:0">' + texto + '</p></div></div></body>';
+  return HtmlService.createHtmlOutput(html).setTitle("VIP-C");
+}
+
+// Lo que pasa cuando el supervisor toca un botón del correo
+function decidir_(token) {
+  const partes = String(token || "").split(".");
+  if (partes.length !== 2 || b64url_(Utilities.computeHmacSha256Signature(partes[0], secreto_())) !== partes[1]) return paginaResultado_("Enlace no válido", "Este enlace está dañado o no es de VIP-C.", false);
+  let d;
+  try { d = JSON.parse(Utilities.newBlob(Utilities.base64DecodeWebSafe(partes[0] + "===".slice((partes[0].length + 3) % 4))).getDataAsString()); }
+  catch (_) { return paginaResultado_("Enlace no válido", "Este enlace está dañado.", false); }
+  if (d.k !== "d") return paginaResultado_("Enlace no válido", "Este enlace no es de aprobación.", false);
+  if (Date.now() > d.exp) return paginaResultado_("Enlace vencido", "Este enlace venció. Si la persona sigue necesitando acceso, puede volver a registrarse.", false);
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    if (d.d === "renovar") {
+      const v = autorizarEmpresa_(d.dom, "", d.sup);
+      return paginaResultado_("Acceso renovado", "Las personas con correo @" + esc_(d.dom) + " pueden volver a ingresar hasta el " + Utilities.formatDate(v, "America/Bogota", "dd/MM/yyyy") + ".", true);
+    }
+    const u = buscarUsuario_(d.u);
+    if (!u) return paginaResultado_("Solicitud no encontrada", "La cuenta ya no existe.", false);
+    if (u.estado !== "PENDIENTE") return paginaResultado_("Solicitud ya resuelta", esc_(u.nombre) + " ya tiene una decisión (estado actual: " + esc_(u.estado || "—") + "). No hace falta hacer nada más.", true);
+    const col = u.u.col["Activo"] + 1;
+    if (d.d === "rechazar") {
+      u.u.h.getRange(u.fila, col).setValue("NO");
+      avisarUsuario_(u, false);
+      return paginaResultado_("Solicitud rechazada", esc_(u.nombre) + " no tendrá acceso a VIP-C.", true);
+    }
+    u.u.h.getRange(u.fila, col).setValue("SI");
+    avisarUsuario_(u, true);
+    if (d.d === "empresa") {
+      const dom = u.correo.split("@")[1].toLowerCase();
+      const v = autorizarEmpresa_(dom, u.empresa, d.sup);
+      // Activa también a otras personas de la misma empresa que estaban esperando
+      const todos = leerUsuarios_(); let otros = 0;
+      todos.filas.forEach(function (r) {
+        const c = texto_(r.t[todos.col["Correo"]]).toLowerCase();
+        if (c && c !== u.correo && terminaEnDominio_(c, dom) && normUsuario_(r.t[todos.col["Activo"]]).toUpperCase() === "PENDIENTE") {
+          todos.h.getRange(r.fila, todos.col["Activo"] + 1).setValue("SI"); otros++;
+          avisarUsuario_({ correo: c, nombre: texto_(r.t[todos.col["Nombre"]]), usuario: texto_(r.t[todos.col["Usuario"]]) }, true);
+        }
+      });
+      return paginaResultado_("Empresa autorizada", esc_(u.nombre) + " ya puede ingresar. Además, cualquier persona con correo @" + esc_(dom) +
+        " podrá registrarse y entrar sola hasta el " + Utilities.formatDate(v, "America/Bogota", "dd/MM/yyyy") + (otros ? " (" + otros + " solicitud(es) más de la misma empresa quedaron aprobadas)" : "") + ".", true);
+    }
+    return paginaResultado_("Acceso aprobado", esc_(u.nombre) + " ya puede ingresar a VIP-C. Le enviamos un correo avisándole.", true);
+  } finally { lock.releaseLock(); }
 }
 
 function secreto_() {
@@ -409,9 +629,11 @@ function validarSesion_(token) {
   let datos;
   try { datos = JSON.parse(Utilities.newBlob(Utilities.base64DecodeWebSafe(partes[0] + "===".slice((partes[0].length + 3) % 4))).getDataAsString()); }
   catch (_) { throw errorSesion_("Sesión no válida. Inicia sesión de nuevo."); }
-  if (!datos.exp || Date.now() > datos.exp) throw errorSesion_("Tu sesión venció. Inicia sesión de nuevo.");
+  if (datos.k || !datos.exp || Date.now() > datos.exp) throw errorSesion_(datos.k ? "Sesión no válida. Inicia sesión de nuevo." : "Tu sesión venció. Inicia sesión de nuevo.");
   const u = buscarUsuario_(datos.u);
   if (!u || !u.activo) throw errorSesion_("Tu usuario no está activo. Habla con el administrador.");
+  const bloqueo = bloqueoPorEmpresa_(u);
+  if (bloqueo) throw errorSesion_(bloqueo);
   return u;
 }
 

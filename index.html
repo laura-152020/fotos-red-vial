@@ -5,15 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>VIP-C · Visor interactivo de puntos críticos</title>
   <meta name="description" content="Carga e inventario fotográfico de puntos críticos de la red vial — Gobernación de Antioquia">
-  <link rel="icon" href="img/logo-gobernacion-antioquia.png?v=4.3">
+  <link rel="icon" href="img/logo-gobernacion-antioquia.png?v=4.6">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
-  <link rel="stylesheet" href="css/style.css?v=4.3">
+  <link rel="stylesheet" href="css/style.css?v=4.6">
 </head>
 <body>
   <header class="topbar">
     <div class="topbar__in">
-      <img class="logo" src="img/logo-gobernacion-antioquia-blanco.png?v=4.3" alt="Gobernación de Antioquia · República de Colombia" width="560" height="253">
+      <img class="logo" src="img/logo-gobernacion-antioquia-blanco.png?v=4.6" alt="Gobernación de Antioquia · República de Colombia" width="560" height="253">
       <div class="marca">
         <div class="marca__sigla">VIP-C</div>
         <div class="marca__nombre">Visor interactivo de puntos críticos</div>
@@ -42,7 +42,7 @@
     <!-- Crear cuenta -->
     <form class="acceso__caja" id="form-registro" novalidate hidden>
       <h1>Crear cuenta</h1>
-      <p class="hint">Solo para personal de la Gobernación de Antioquia y empresas autorizadas. Usa tu <b>correo institucional o de tu empresa</b>: si está autorizado, te llega un código y entras de inmediato; si no, un administrador revisa tu solicitud.</p>
+      <p class="hint">Solo para personal de la <b>Gobernación de Antioquia</b> y de <b>empresas contratistas</b>. Regístrate con tu correo institucional o el de tu empresa; te llegará un código de verificación. No se aceptan correos personales (Gmail, Hotmail, Outlook…).</p>
       <label for="reg-nombre"><span>Nombre completo</span><input id="reg-nombre" autocomplete="name" required></label>
       <label for="reg-correo"><span>Correo institucional o de tu empresa</span><input id="reg-correo" type="email" autocomplete="email" autocapitalize="none" spellcheck="false" required></label>
       <label for="reg-entidad"><span>Perteneces a</span>
@@ -52,7 +52,11 @@
           <option>Empresa externa</option>
         </select>
       </label>
-      <label for="reg-empresa" id="lbl-empresa" hidden><span>Nombre de la empresa</span><input id="reg-empresa" autocomplete="organization"></label>
+      <div id="bloque-empresa" class="campos" hidden>
+        <label for="reg-empresa"><span>Nombre de la empresa</span><input id="reg-empresa" autocomplete="organization"></label>
+        <label for="reg-supervisor"><span>Correo de tu supervisor en la Gobernación</span><input id="reg-supervisor" type="email" autocapitalize="none" spellcheck="false" placeholder="nombre@antioquia.gov.co"></label>
+        <p class="hint">Si tu empresa aún no está autorizada, le enviaremos un correo a tu supervisor para que apruebe tu acceso con un clic.</p>
+      </div>
       <label for="reg-usuario"><span>Usuario</span><input id="reg-usuario" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="ej. jperez" required></label>
       <label for="reg-clave"><span>Contraseña</span><input id="reg-clave" type="password" autocomplete="new-password" required></label>
       <label for="reg-clave2"><span>Repite la contraseña</span><input id="reg-clave2" type="password" autocomplete="new-password" required></label>
@@ -75,7 +79,7 @@
     <!-- Solicitud enviada -->
     <div class="acceso__caja" id="caja-pendiente" hidden>
       <h1>Solicitud enviada</h1>
-      <p>Un administrador debe aprobar tu cuenta. Podrás ingresar con tu usuario y contraseña cuando la active.</p>
+      <p id="pendiente-texto">Un administrador debe aprobar tu cuenta. Podrás ingresar con tu usuario y contraseña cuando la active.</p>
       <button type="button" class="btn" data-ir="ingreso">Volver al ingreso</button>
     </div>
   </main>
@@ -141,9 +145,9 @@
 
   <script src="https://cdn.jsdelivr.net/npm/exifr@7.1.3/dist/lite.umd.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@6.0.1/dist/tesseract.min.js"></script>
-  <script src="js/config.js?v=4.3"></script>
-  <script src="js/municipios.js?v=4.3"></script>
-  <script src="js/ocr.js?v=4.3"></script>
-  <script src="js/app.js?v=4.3"></script>
+  <script src="js/config.js?v=4.6"></script>
+  <script src="js/municipios.js?v=4.6"></script>
+  <script src="js/ocr.js?v=4.6"></script>
+  <script src="js/app.js?v=4.6"></script>
 </body>
 </html>

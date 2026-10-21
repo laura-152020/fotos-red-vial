@@ -66,19 +66,21 @@ La página abre con una pantalla de **Ingreso**. Solo entran las personas regist
 - Cada registro guardado queda con el usuario que lo cargó (columna `RegistradoPor`).
 - **Cerrar todas las sesiones de una vez:** borra la propiedad `SESSION_SECRET` del Apps Script; se crea otra sola.
 
-**Registro propio (botón «Crear cuenta»):** cada persona crea su usuario y contraseña. El acceso se decide por el correo:
+**Registro propio (botón «Crear cuenta»):** cada persona crea su usuario y contraseña y confirma su correo con un código. **El administrador no interviene:**
 
 | Correo | Resultado |
 |---|---|
-| `@antioquia.gov.co` | Llega un código al correo; al escribirlo, entra. Automático. |
-| Dominio de una empresa en la hoja **EmpresasAutorizadas** (Activo = SI) | Igual: código al correo y entra. Automático. |
-| Empresa que no está en la lista | Queda `PENDIENTE`; te llega un aviso que sugiere agregar su dominio. |
-| Correo personal (gmail, hotmail, outlook…) | Queda `PENDIENTE`; el aviso advierte que es personal. Lo normal es rechazarlo (`NO`). |
+| `@antioquia.gov.co` | Código al correo → entra. |
+| Empresa ya autorizada y vigente | Código al correo → entra. |
+| Empresa nueva | La persona escribe el correo de **su supervisor en la Gobernación**. Tras confirmar su código, al supervisor le llega un correo con 3 botones: **Aprobar a esta persona**, **Aprobar a toda la empresa (12 meses)** o **Rechazar**. Un clic y listo; la persona recibe un correo con la respuesta. |
+| Correo personal (gmail, hotmail, outlook…) | **Rechazado** siempre. |
 
-- **Autorizar una empresa:** en la hoja `EmpresasAutorizadas`, agrega una fila: Dominio `consorciovial.com` · Empresa `Consorcio Vial` · Activo `SI`. Desde ese momento sus empleados se registran solos. Para quitarle el acceso a nuevos registros, pon `NO` (para sacar a quienes ya entraron, pon `NO` en su fila de `Usuarios`).
-- Los dominios de correo personal nunca se autorizan por dominio, aunque los agregues por error.
-- Los avisos llegan al correo de la propiedad `ADMIN_EMAIL` (o al dueño del script). La contraseña se guarda cifrada desde el registro. Se puede ingresar con el usuario o con el correo.
-- Límites: 30 registros por hora y 5 intentos por código.
+- «Toda la empresa» agrega su dominio a la hoja `EmpresasAutorizadas` con fecha **Vence** (+12 meses) y **AutorizadaPor**; sus demás empleados entran solos con código, y las solicitudes pendientes de esa empresa quedan aprobadas.
+- Al vencer, sus usuarios no pueden entrar y al supervisor le llega un botón **Renovar** (máximo un correo al día por empresa).
+- Los botones del correo funcionan 7 días y están firmados: no se pueden falsificar ni reutilizar para otra persona.
+- La hoja `EmpresasAutorizadas` se llena sola; solo la tocas si quieres corregir algo (por ejemplo, `NO` en Activo corta el acceso de una empresa al instante).
+- Propiedad recomendada: `WEBAPP_URL` = la URL `/exec` del Apps Script (asegura que los botones del correo apunten bien).
+- Cuota de Google: una cuenta Gmail gratuita envía hasta ~100 correos al día (cada registro usa 1–3). Con Google Workspace el límite es mucho mayor.
 
 **Qué protege y qué no:** los datos, el guardado y la lectura con Gemini exigen sesión válida, y eso lo controla el servidor. El diseño de la página (HTML y JS) sigue siendo público en GitHub Pages, aunque sin sesión no muestra el formulario ni permite usarlo.
 

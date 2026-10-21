@@ -569,7 +569,8 @@
   }
   $("#ir-registro").addEventListener("click", () => { $("#reg-msg").textContent = ""; verAcceso("registro"); });
   document.querySelectorAll("[data-ir]").forEach((b) => b.addEventListener("click", () => { $("#acc-msg").textContent = ""; verAcceso(b.dataset.ir); }));
-  $("#reg-entidad").addEventListener("change", () => { $("#lbl-empresa").hidden = $("#reg-entidad").value !== "Empresa externa"; });
+  $("#reg-entidad").addEventListener("change", () => { $("#bloque-empresa").hidden = $("#reg-entidad").value !== "Empresa externa"; });
+  $("#reg-supervisor").addEventListener("input", (e) => e.target.classList.remove("is-invalid"));
   // Sugerir usuario a partir del correo
   $("#reg-correo").addEventListener("change", () => {
     const u = $("#reg-usuario");
@@ -578,7 +579,7 @@
 
   $("#form-registro").addEventListener("submit", async (e) => {
     e.preventDefault();
-    const d = { nombre: $("#reg-nombre").value.trim(), correo: $("#reg-correo").value.trim(), entidad: $("#reg-entidad").value, empresa: $("#reg-empresa").value.trim(),
+    const d = { nombre: $("#reg-nombre").value.trim(), correo: $("#reg-correo").value.trim(), entidad: $("#reg-entidad").value, empresa: $("#reg-empresa").value.trim(), supervisor: $("#reg-supervisor").value.trim().toLowerCase(),
       usuario: $("#reg-usuario").value.trim().toLowerCase(), clave: $("#reg-clave").value };
     const msg = $("#reg-msg");
     if (!d.nombre || !d.correo || !d.entidad || !d.usuario || !d.clave || (d.entidad === "Empresa externa" && !d.empresa)) { msg.textContent = "Completa todos los campos."; return; }
@@ -588,8 +589,11 @@
     const r = await Api.post("registro", d);
     b.disabled = false; b.textContent = "Crear cuenta";
     if (r.status === "verificar") { $("#acc-usuario").value = r.usuario; pedirCodigo(r.usuario, r.correo); }
-    else if (r.status === "pendiente") { $("#acc-usuario").value = d.usuario; verAcceso("pendiente"); }
-    else msg.textContent = r.message || "No se pudo crear la cuenta.";
+    else if (r.status === "pendiente") { $("#acc-usuario").value = d.usuario; $("#pendiente-texto").textContent = r.message; verAcceso("pendiente"); }
+    else {
+      msg.textContent = r.message || "No se pudo crear la cuenta.";
+      if (r.necesitaSupervisor) { $("#reg-entidad").value = "Empresa externa"; $("#bloque-empresa").hidden = false; $("#reg-supervisor").classList.add("is-invalid"); $("#reg-supervisor").focus(); }
+    }
     if (r.status === "verificar" || r.status === "pendiente") ["#reg-clave", "#reg-clave2"].forEach((id) => { $(id).value = ""; });
   });
 
@@ -601,6 +605,9 @@
     const b = $("#ver-enviar"); b.disabled = true; b.textContent = "Verificando…";
     const r = await Api.post("verificar", { usuario: usuarioPorVerificar, codigo });
     b.disabled = false; b.textContent = "Confirmar";
+    if (r.status === "pendiente_supervisor" || r.status === "pendiente") {
+      $("#pendiente-texto").textContent = r.message; verAcceso("pendiente"); return;
+    }
     if (r.status !== "success") { msg.textContent = r.message || "No se pudo verificar."; return; }
     verAcceso("ingreso");
     $("#acc-usuario").value = usuarioPorVerificar;
