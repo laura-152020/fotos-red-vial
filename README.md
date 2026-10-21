@@ -66,6 +66,20 @@ La página abre con una pantalla de **Ingreso**. Solo entran las personas regist
 - Cada registro guardado queda con el usuario que lo cargó (columna `RegistradoPor`).
 - **Cerrar todas las sesiones de una vez:** borra la propiedad `SESSION_SECRET` del Apps Script; se crea otra sola.
 
+**Registro propio (botón «Crear cuenta»):** cada persona crea su usuario y contraseña. El acceso se decide por el correo:
+
+| Correo | Resultado |
+|---|---|
+| `@antioquia.gov.co` | Llega un código al correo; al escribirlo, entra. Automático. |
+| Dominio de una empresa en la hoja **EmpresasAutorizadas** (Activo = SI) | Igual: código al correo y entra. Automático. |
+| Empresa que no está en la lista | Queda `PENDIENTE`; te llega un aviso que sugiere agregar su dominio. |
+| Correo personal (gmail, hotmail, outlook…) | Queda `PENDIENTE`; el aviso advierte que es personal. Lo normal es rechazarlo (`NO`). |
+
+- **Autorizar una empresa:** en la hoja `EmpresasAutorizadas`, agrega una fila: Dominio `consorciovial.com` · Empresa `Consorcio Vial` · Activo `SI`. Desde ese momento sus empleados se registran solos. Para quitarle el acceso a nuevos registros, pon `NO` (para sacar a quienes ya entraron, pon `NO` en su fila de `Usuarios`).
+- Los dominios de correo personal nunca se autorizan por dominio, aunque los agregues por error.
+- Los avisos llegan al correo de la propiedad `ADMIN_EMAIL` (o al dueño del script). La contraseña se guarda cifrada desde el registro. Se puede ingresar con el usuario o con el correo.
+- Límites: 30 registros por hora y 5 intentos por código.
+
 **Qué protege y qué no:** los datos, el guardado y la lectura con Gemini exigen sesión válida, y eso lo controla el servidor. El diseño de la página (HTML y JS) sigue siendo público en GitHub Pages, aunque sin sesión no muestra el formulario ni permite usarlo.
 
 La lectura de fotos en el navegador tarda 1 o 2 segundos por foto. La primera vez descarga el lector, unos 5 MB.

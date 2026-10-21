@@ -516,9 +516,15 @@
     };
   })();
 
+  const VISTAS_ACCESO = { ingreso: "#form-acceso", registro: "#form-registro", verificar: "#form-verificar", pendiente: "#caja-pendiente" };
+  function verAcceso(cual) {
+    Object.entries(VISTAS_ACCESO).forEach(([k, sel]) => { $(sel).hidden = k !== cual; });
+    const primero = $(VISTAS_ACCESO[cual] + " input"); if (primero) setTimeout(() => { try { primero.focus(); } catch (_) {} }, 50);
+  }
   function mostrarAcceso(msg) {
     $("#app").hidden = true; $("#barra").hidden = true; $("#usuario").hidden = true;
     $("#acceso").hidden = false;
+    verAcceso("ingreso");
     $("#acc-msg").textContent = msg || "";
     $("#acc-entrar").disabled = !HAY_BACKEND;
     setTimeout(() => { try { $("#acc-usuario").focus(); } catch (_) {} }, 50);
@@ -540,14 +546,72 @@
   $("#form-acceso").addEventListener("submit", async (e) => {
     e.preventDefault();
     const usuario = $("#acc-usuario").value.trim(), clave = $("#acc-clave").value;
+    $("#acc-msg").classList.remove("is-ok");
     if (!usuario || !clave) { $("#acc-msg").textContent = "Escribe tu usuario y tu contraseña."; return; }
     const b = $("#acc-entrar"); b.disabled = true; b.textContent = "Verificando…"; $("#acc-msg").textContent = "";
     const r = await Api.post("login", { usuario, clave });
     b.disabled = false; b.textContent = "Ingresar";
+    if (r.status === "verificar") { pedirCodigo(r.usuario, r.correo, r.message); return; }
     if (r.status !== "success") { $("#acc-msg").textContent = r.message || "No se pudo iniciar sesión."; $("#acc-clave").select(); return; }
     Sesion.guardar({ sesion: r.sesion, usuario: r.usuario, nombre: r.nombre, rol: r.rol, expira: r.expira });
     $("#acc-clave").value = "";
     mostrarApp();
+  });
+
+  /* ---------- Crear cuenta y verificar correo ---------- */
+  let usuarioPorVerificar = "";
+  function pedirCodigo(usuario, correo, msg) {
+    usuarioPorVerificar = usuario;
+    $("#ver-texto").textContent = `Te enviamos un código de 6 dígitos a ${correo || "tu correo"}. Revisa también la carpeta de spam.`;
+    $("#ver-msg").textContent = msg && !/enviamos/i.test(msg) ? msg : ""; $("#ver-msg").className = "acceso__msg";
+    $("#ver-codigo").value = "";
+    verAcceso("verificar");
+  }
+  $("#ir-registro").addEventListener("click", () => { $("#reg-msg").textContent = ""; verAcceso("registro"); });
+  document.querySelectorAll("[data-ir]").forEach((b) => b.addEventListener("click", () => { $("#acc-msg").textContent = ""; verAcceso(b.dataset.ir); }));
+  $("#reg-entidad").addEventListener("change", () => { $("#lbl-empresa").hidden = $("#reg-entidad").value !== "Empresa externa"; });
+  // Sugerir usuario a partir del correo
+  $("#reg-correo").addEventListener("change", () => {
+    const u = $("#reg-usuario");
+    if (!u.value) u.value = $("#reg-correo").value.split("@")[0].toLowerCase().replace(/[^a-z0-9._-]/g, "").slice(0, 30);
+  });
+
+  $("#form-registro").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const d = { nombre: $("#reg-nombre").value.trim(), correo: $("#reg-correo").value.trim(), entidad: $("#reg-entidad").value, empresa: $("#reg-empresa").value.trim(),
+      usuario: $("#reg-usuario").value.trim().toLowerCase(), clave: $("#reg-clave").value };
+    const msg = $("#reg-msg");
+    if (!d.nombre || !d.correo || !d.entidad || !d.usuario || !d.clave || (d.entidad === "Empresa externa" && !d.empresa)) { msg.textContent = "Completa todos los campos."; return; }
+    if (d.clave !== $("#reg-clave2").value) { msg.textContent = "Las contraseñas no coinciden."; return; }
+    if (d.clave.length < 8 || !/[a-zA-Z]/.test(d.clave) || !/\d/.test(d.clave)) { msg.textContent = "La contraseña debe tener al menos 8 caracteres, con letras y números."; return; }
+    const b = $("#reg-enviar"); b.disabled = true; b.textContent = "Enviando…"; msg.textContent = "";
+    const r = await Api.post("registro", d);
+    b.disabled = false; b.textContent = "Crear cuenta";
+    if (r.status === "verificar") { $("#acc-usuario").value = r.usuario; pedirCodigo(r.usuario, r.correo); }
+    else if (r.status === "pendiente") { $("#acc-usuario").value = d.usuario; verAcceso("pendiente"); }
+    else msg.textContent = r.message || "No se pudo crear la cuenta.";
+    if (r.status === "verificar" || r.status === "pendiente") ["#reg-clave", "#reg-clave2"].forEach((id) => { $(id).value = ""; });
+  });
+
+  $("#form-verificar").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const codigo = $("#ver-codigo").value.replace(/\D/g, "");
+    const msg = $("#ver-msg"); msg.className = "acceso__msg";
+    if (codigo.length !== 6) { msg.textContent = "Escribe los 6 dígitos del código."; return; }
+    const b = $("#ver-enviar"); b.disabled = true; b.textContent = "Verificando…";
+    const r = await Api.post("verificar", { usuario: usuarioPorVerificar, codigo });
+    b.disabled = false; b.textContent = "Confirmar";
+    if (r.status !== "success") { msg.textContent = r.message || "No se pudo verificar."; return; }
+    verAcceso("ingreso");
+    $("#acc-usuario").value = usuarioPorVerificar;
+    $("#acc-msg").textContent = "Correo confirmado. Ingresa con tu contraseña."; $("#acc-msg").classList.add("is-ok");
+    setTimeout(() => { try { $("#acc-clave").focus(); } catch (_) {} }, 60);
+  });
+  $("#ver-reenviar").addEventListener("click", async () => {
+    const msg = $("#ver-msg");
+    const r = await Api.post("reenviar", { usuario: usuarioPorVerificar });
+    msg.className = "acceso__msg" + (r.status === "success" ? " is-ok" : "");
+    msg.textContent = r.message || "";
   });
 
   const salir = $("#salir");

@@ -156,3 +156,7 @@ textarea{min-height:64px;resize:vertical}
 .usuario__salir{background:transparent;border:1px solid rgba(255,255,255,.5);color:#fff;border-radius:6px;padding:6px 10px;font-size:13px;font-weight:600;cursor:pointer}
 .usuario__salir:hover{background:rgba(255,255,255,.12)}
 @media (max-width:520px){.usuario{margin-left:0;flex-basis:100%;justify-content:space-between}}
+.acceso__alt{margin:0;font-size:14px;color:var(--muted);text-align:center}
+.enlace{background:none;border:0;padding:0;color:var(--brand);font-weight:600;cursor:pointer;text-decoration:underline;font-size:inherit}
+.acceso__msg.is-ok{color:var(--ok)}
+#ver-codigo{font:600 24px var(--f-mono);letter-spacing:.3em;text-align:center}
