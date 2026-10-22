@@ -160,3 +160,6 @@ textarea{min-height:64px;resize:vertical}
 .enlace{background:none;border:0;padding:0;color:var(--brand);font-weight:600;cursor:pointer;text-decoration:underline;font-size:inherit}
 .acceso__msg.is-ok{color:var(--ok)}
 #ver-codigo{font:600 24px var(--f-mono);letter-spacing:.3em;text-align:center}
+/* 3. Carga desde PDF: ícono de documento */
+.drop--pdf .drop__icon{width:30px;height:38px;border-radius:3px 12px 3px 3px}
+.drop--pdf .drop__icon::after{width:14px;height:0;border-width:3px 0 0;border-radius:0;box-shadow:0 7px 0 -0px var(--brand),0 14px 0 0 var(--brand);top:9px;transform:translateX(-50%)}

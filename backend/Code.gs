@@ -82,7 +82,7 @@ const ANTIOQUIA = { latMin: 5.40, latMax: 8.90, lonMin: -77.15, lonMax: -73.85 }
 
 function doGet(e) {
   const p = (e && e.parameter) || {};
-  if (!p.accion) return json_({ status: "online", servicio: "VIP-C", version: "5.0.0" });
+  if (!p.accion) return json_({ status: "online", servicio: "VIP-C", version: "5.1.0" });
   if (p.accion === "decidir") return decidir_(p.t);
   try {
     // Exportación (ArcGIS): con la clave de administrador o con una sesión válida
@@ -114,6 +114,7 @@ function doPost(e) {
     const usuario = validarSesion_(payload.sesion);
     if (payload.accion === "sesion") return json_({ status: "success", usuario: usuario.usuario, nombre: usuario.nombre, rol: usuario.rol });
     if (payload.accion === "leer") return json_(leerSello_(payload));
+    if (payload.accion === "leerPdf") return json_(leerPdf_(payload));
     if (payload.accion === "subir") { payload.registradoPor = usuario.usuario; return json_(subirFoto_(payload)); }
     if (payload.accion === "anular") return json_(anularRegistro_(payload));
     throw new Error("Acción no reconocida.");
@@ -856,6 +857,63 @@ function leerSello_(payload) {
   };
 }
 
+/* ======================= Lectura de actas en PDF (Gemini) ======================= */
+// Se usa solo cuando el lector del navegador no encuentra coordenadas, fecha o vía en el PDF.
+function leerPdf_(payload) {
+  if (!payload.base64) throw new Error("No llegó el PDF.");
+  const key = prop_("GEMINI_API_KEY");
+  const modelo = prop_("GEMINI_MODEL", true) || "gemini-3.8-flash";
+  const prompt =
+    "El PDF es un acta de visita técnica o informe técnico de vías de la Gobernación de Antioquia (Colombia). " +
+    "Extrae los datos EXACTAMENTE como aparecen. No inventes: si algo no aparece, devuelve \"\".\n" +
+    "Responde SOLO JSON con estas claves:\n" +
+    "fecha_iso (fecha en que se hizo la visita, AAAA-MM-DD; NO la fecha de aprobación del formato), " +
+    "codigo_via (código oficial de la vía, ej 05656VT131 o 60AN17), " +
+    "via (nombre de la vía o tramo, ej \"El Puerto - La Miserenga\"), " +
+    "municipio (municipio de Antioquia donde está la vía), " +
+    "puntos (lista: un elemento por cada sitio con coordenadas distintas, con las claves " +
+    "nombre (ej \"Tramo 1\"), latitud (tal cual, ej N 6°22'10\"), longitud (tal cual, ej W 75°42'28\"), " +
+    "tipo_afectacion (exactamente uno de: " + TIPOS_AFECTACION.join(" | ") + "), " +
+    "descripcion (lo encontrado y lo recomendado en ese sitio, máximo 3 frases), pagina (número de página donde se describe)).";
+  const body = {
+    contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: "application/pdf", data: payload.base64 } }] }],
+    generationConfig: { responseMimeType: "application/json", temperature: 0 }
+  };
+  const url = "https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(modelo) + ":generateContent";
+  const res = UrlFetchApp.fetch(url, {
+    method: "post", contentType: "application/json", muteHttpExceptions: true,
+    headers: { "x-goog-api-key": key }, payload: JSON.stringify(body)
+  });
+  const code = res.getResponseCode();
+  if (code === 429) return { status: "error", reintentar: true, message: "Gemini está limitando solicitudes. Intenta de nuevo en un minuto." };
+  if (code !== 200) return { status: "error", message: "Gemini respondió " + code + ": " + res.getContentText().slice(0, 200) };
+  const r = JSON.parse(res.getContentText());
+  const texto = r && r.candidates && r.candidates[0] && r.candidates[0].content &&
+    r.candidates[0].content.parts && r.candidates[0].content.parts[0] && r.candidates[0].content.parts[0].text;
+  if (!texto) return { status: "error", message: "Gemini no devolvió texto para este PDF." };
+  let d;
+  try { d = JSON.parse(texto.replace(/^```json\s*|```$/g, "")); }
+  catch (_) { return { status: "error", message: "No se pudo interpretar la respuesta de Gemini." }; }
+  const puntos = (Array.isArray(d.puntos) ? d.puntos : []).map(function (p) {
+    const lat = dmsADecimal_(p.latitud);
+    let lon = dmsADecimal_(p.longitud);
+    if (lon !== null && lon > 60) lon = -lon;
+    return {
+      nombre: String(p.nombre || ""), latitud: lat, longitud: lon,
+      tipoAfectacion: TIPOS_AFECTACION.indexOf(p.tipo_afectacion) >= 0 ? p.tipo_afectacion : "",
+      descripcion: String(p.descripcion || ""), pagina: Number(p.pagina) || 1
+    };
+  });
+  return {
+    status: "success",
+    fecha: /^\d{4}-\d{2}-\d{2}$/.test(d.fecha_iso || "") ? d.fecha_iso : "",
+    codigoVia: String(d.codigo_via || "").toUpperCase().replace(/\s/g, ""),
+    via: String(d.via || "").replace(/^\s*v[ií]a\s*/i, ""),
+    municipio: String(d.municipio || ""),
+    puntos: puntos
+  };
+}
+
 /* ======================= Guardado (Drive + Sheets) ======================= */
 
 function subirFoto_(p) {
@@ -871,16 +929,21 @@ function subirFoto_(p) {
   if ((lat === null) !== (lon === null)) throw new Error("Faltan latitud o longitud.");
   if (lat !== null && (lat < -90 || lat > 90 || lon < -180 || lon > 180)) throw new Error("Coordenadas fuera de rango.");
 
-  // Drive (solo si hay foto): Raíz / Subregion / Municipio / archivo
+  // Drive (solo si hay foto o PDF): Raíz / Subregion / Municipio / archivo
   let archivo = null;
-  if (p.base64) {
+  if (p.archivoId) {
+    // Otro punto del mismo PDF: se reutiliza el archivo ya subido (solo archivos creados por VIP-C)
+    try { archivo = DriveApp.getFileById(texto_(p.archivoId)); } catch (_) { archivo = null; }
+    if (!archivo || String(archivo.getDescription() || "").indexOf("VIP-C") !== 0) throw new Error("No se encontró el PDF ya guardado. Vuelve a cargarlo.");
+  } else if (p.base64) {
     const raiz = DriveApp.getFolderById(prop_("ROOT_FOLDER_ID"));
     const cSub = carpeta_(raiz, limpiar_(p.subregion || "Sin subregion"));
     const cMun = carpeta_(cSub, limpiar_(p.municipio));
-    const nombre = limpiar_((texto_(p.fecha) || "sin-fecha") + "_" + (texto_(p.codigoVia) || texto_(p.nombreTramo) || "via") + "_" + (p.nombreArchivo || "foto.jpg"));
-    const blob = Utilities.newBlob(Utilities.base64Decode(p.base64), p.mimeType || "image/jpeg", nombre);
+    const esPdf = p.mimeType === "application/pdf";
+    const nombre = limpiar_((texto_(p.fecha) || "sin-fecha") + "_" + (texto_(p.codigoVia) || texto_(p.nombreTramo) || "via") + "_" + (p.nombreArchivo || (esPdf ? "acta.pdf" : "foto.jpg")));
+    const blob = Utilities.newBlob(Utilities.base64Decode(p.base64), esPdf ? "application/pdf" : "image/jpeg", nombre);
     archivo = cMun.createFile(blob);
-    archivo.setDescription("VIP-C | " + texto_(p.codigoVia) + " " + texto_(p.nombreTramo) + " | " + texto_(p.municipio) + " | " + texto_(p.estadoPunto));
+    archivo.setDescription("VIP-C | " + texto_(p.codigoVia) + " " + texto_(p.nombreTramo) + " | " + texto_(p.municipio) + " | " + texto_(p.tipoAfectacion));
     try { archivo.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW); } catch (_) { /* dominio restringido */ }
   }
 
@@ -896,7 +959,7 @@ function subirFoto_(p) {
       lat === null ? "" : lat, lon === null ? "" : lon,
       texto_(p.codigoVia).toUpperCase(), texto_(p.nombreTramo), texto_(p.subregion), texto_(p.municipio),
       texto_(p.tipoAfectacion), texto_(p.responsable), texto_(p.estadoPunto), texto_(p.observaciones),
-      archivo ? "foto" : "manual",
+      archivo ? (p.origen === "pdf" ? "pdf" : "foto") : "manual",
       archivo ? archivo.getName() : "", archivo ? archivo.getId() : "", archivo ? archivo.getUrl() : "",
       texto_(p.origenUbicacion) || "manual", p.selloLegible ? "SI" : "NO",
       fueraDeAntioquia_(lat, lon) ? "SI" : "NO",

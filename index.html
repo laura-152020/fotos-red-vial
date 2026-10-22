@@ -87,10 +87,11 @@
   <main class="vista" id="app" hidden>
     <section class="intro">
       <h1>Carga e inventario fotográfico</h1>
-      <p>Sube la información de las visitas de una de estas dos formas:</p>
+      <p>Sube la información de las visitas de una de estas tres formas:</p>
       <ol class="modos">
         <li><a href="#manual"><b>Carga manual de datos</b></a> <span>si no tienes evidencias fotográficas.</span></li>
         <li><a href="#fotos"><b>Carga fotográfica</b></a> <span>sube una foto y la información se llena automáticamente.</span></li>
+        <li><a href="#pdfs"><b>Carga desde PDF</b></a> <span>sube el acta de visita técnica y la información se llena automáticamente.</span></li>
       </ol>
     </section>
 
@@ -115,6 +116,14 @@
       <strong><span class="num">2</span> Carga fotográfica y relleno automático</strong>
       <small>Toca para elegir en el celular o arrastra aquí en el computador · JPG, PNG, WEBP hasta 20 MB.<br>Se leen del sello de la foto la fecha, las coordenadas y la vía.</small>
       <input id="archivos" type="file" accept="image/jpeg,image/png,image/webp" multiple>
+    </label>
+
+    <!-- 3. CARGA DESDE PDF -->
+    <label class="drop drop--pdf" id="pdfs" for="archivos-pdf">
+      <span class="drop__icon" aria-hidden="true"></span>
+      <strong><span class="num">3</span> Carga desde PDF y relleno automático</strong>
+      <small>Toca para elegir en el celular o arrastra aquí en el computador · PDF hasta 20 MB.<br>Del acta de visita técnica se leen la fecha, la vía, el código, las coordenadas de cada tramo, el tipo de afectación y la descripción.</small>
+      <input id="archivos-pdf" type="file" accept="application/pdf,.pdf" multiple>
     </label>
 
     <div id="aviso" class="aviso" role="status" hidden></div>
@@ -148,6 +157,7 @@
   <script src="js/config.js?v=5.0"></script>
   <script src="js/municipios.js?v=5.0"></script>
   <script src="js/ocr.js?v=5.0"></script>
+  <script src="js/lectorpdf.js?v=5.0"></script>
   <script src="js/app.js?v=5.0"></script>
 </body>
 </html>

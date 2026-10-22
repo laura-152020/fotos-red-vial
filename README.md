@@ -4,6 +4,7 @@ Gobernación de Antioquia. Página web para celular y computador que registra lo
 
 1. **Carga manual de datos**, cuando no hay evidencias fotográficas. Se puede usar la ubicación actual del celular.
 2. **Carga fotográfica y relleno automático**: se sube la foto y se leen de su sello la fecha, las coordenadas y la vía.
+3. **Carga desde PDF**: se sube el acta de visita técnica (formato FO-M2-P11-061 u otro con texto) y se crea un registro por cada punto con coordenadas: fecha de la visita, código y nombre de la vía, coordenadas, tipo de afectación y la descripción del tramo en Observaciones. El PDF se guarda una sola vez en Drive y queda enlazado a todos sus puntos. Si el lector del navegador no encuentra coordenadas, fecha o vía, se le pide a Gemini. Los PDF escaneados (solo imagen) no se leen en el navegador.
 
 En los dos casos, el municipio se deduce de las coordenadas y la subregión del municipio.
 
@@ -25,6 +26,7 @@ img/logo-gobernacion-antioquia.png   Logo con fondo transparente
 js/config.js                     ÚNICO archivo a editar al desplegar (URL y clave del Apps Script)
 js/app.js                        Formulario, lista de registros y guardado
 js/ocr.js                        Lectura del sello (fecha, coordenadas, tramo, código de vía)
+js/lectorpdf.js                  Lectura de actas en PDF (pdf.js)
 js/municipios.js                 125 municipios con subregión y límites (DANE, MGN 2018)
 backend/Code.gs                  Apps Script (un solo archivo)
 backend/appsscript.json          Manifiesto del Apps Script

@@ -96,7 +96,7 @@
   }
   function lineaCoord(r) {
     if (!tieneCoord(r)) return "Sin coordenadas";
-    const origen = { sello: "leídas del sello", gps: "GPS de la foto", dispositivo: "ubicación del dispositivo", manual: "escritas a mano", servidor: "leídas del sello" }[r.origenUbicacion] || "";
+    const origen = { pdf: "leídas del PDF", sello: "leídas del sello", gps: "GPS de la foto", dispositivo: "ubicación del dispositivo", manual: "escritas a mano", servidor: "leídas del sello" }[r.origenUbicacion] || "";
     return `${r.latitud.toFixed(6)}, ${r.longitud.toFixed(6)}${origen ? " · " + origen : ""} <a href="https://www.google.com/maps?q=${r.latitud},${r.longitud}" target="_blank" rel="noopener">Ver ubicación</a>`;
   }
   function campos(r, p) {
@@ -320,18 +320,105 @@
     a.hidden = !texto;
   }
 
+
+  /* ======================= 3. Carga desde PDF (acta de visita técnica) ======================= */
+  function aBase64(bytes) {
+    let bin = "";
+    for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(bin);
+  }
+  // Municipio escrito en el acta (ej. «MUNICIPIO Medellín/San Jerónimo VÍA …»)
+  function municipiosDelTexto(plano) {
+    const m = String(plano || "").match(/MUNICIPIO\s+(.{3,70}?)\s+(?:V[IÍ]A\b|C[OÓ]DIGO)/i);
+    if (!m) return [];
+    return m[1].split(/\s*(?:\/|,|;|\sy\s|\s-\s)\s*/).map((x) => MUN_POR_NOMBRE[norm(x)]).filter(Boolean);
+  }
+
+  async function agregarPDF(files) {
+    const maxMB = 20;
+    for (const f of files) {
+      if (f.type !== "application/pdf" && !/\.pdf$/i.test(f.name)) { aviso(f.name + " no es un PDF.", true); continue; }
+      if (f.size > maxMB * 1048576) { aviso(f.name + " supera " + maxMB + " MB.", true); continue; }
+      aviso("Leyendo " + f.name + "…");
+      let bytes, lectura, d;
+      try {
+        bytes = new Uint8Array(await f.arrayBuffer());
+        lectura = await LectorPDF.abrir(bytes.slice());
+        d = LectorPDF.interpretar(lectura.paginas);
+      } catch (e) { aviso("No se pudo leer " + f.name + ": " + (e.message || "PDF dañado o protegido") + ".", true); continue; }
+      const base64 = aBase64(bytes);
+
+      // Si al lector del navegador le faltan datos, se le pide a Gemini (con el servidor conectado)
+      if (HAY_BACKEND && (!d.puntos.length || !d.fecha || (!d.codigoVia && !d.via))) {
+        aviso("Leyendo " + f.name + " con Gemini…");
+        const g = await Api.post("leerPdf", { base64 });
+        if (g.status === "success") {
+          d.fecha = d.fecha || g.fecha || ""; d.codigoVia = d.codigoVia || g.codigoVia || ""; d.via = d.via || g.via || "";
+          d.municipioTexto = g.municipio || "";
+          if (!d.puntos.length && Array.isArray(g.puntos)) {
+            d.puntos = g.puntos.filter((p) => p.latitud != null && p.longitud != null)
+              .map((p, k) => ({ lat: p.latitud, lon: p.longitud, nombre: p.nombre || "Punto " + (k + 1), tipo: p.tipoAfectacion || "", descripcion: p.descripcion || "", pagina: p.pagina || 1 }));
+          }
+        }
+      }
+      if (!lectura.paginas.join("").trim()) { aviso(f.name + " no tiene texto (parece escaneado). Completa los datos a mano.", true); }
+
+      const pdf = { base64, fileId: null };
+      const enTexto = municipiosDelTexto(d.texto);
+      const responsable = d.esGobernacion ? "Gobernación" : (manual.responsable || "");
+      const puntos = d.puntos.length ? d.puntos : [{ lat: null, lon: null, nombre: "", tipo: d.tipoGeneral, descripcion: "", pagina: 1 }];
+      const imagenes = {}, nuevos = [];
+      for (const p of puntos) {
+        const pag = Math.min(Math.max(1, p.pagina || 1), lectura.doc.numPages);
+        if (!imagenes[pag]) {
+          try {
+            const grande = await LectorPDF.dibujarPagina(lectura.doc, pag, 1100);
+            imagenes[pag] = { grande, mini: await LectorPDF.dibujarPagina(lectura.doc, pag, 360) };
+          } catch (_) { imagenes[pag] = { grande: "", mini: "" }; }
+        }
+        const r = nuevoRegistro({
+          origen: "pdf", estado: "listo", nombreArchivo: f.name, punto: p.nombre, pagina: pag, pdf,
+          dataUrl: imagenes[pag].grande, miniatura: imagenes[pag].mini,
+          fecha: d.fecha || "", fechaTexto: d.fechaTexto || "", codigoVia: d.codigoVia || "", nombreTramo: d.via || "",
+          tipoAfectacion: TIPOS_AFECTACION.includes(p.tipo) ? p.tipo : "", responsable,
+          observaciones: p.descripcion || ""
+        });
+        if (p.lat != null && p.lon != null) {
+          r.latitud = p.lat; r.longitud = p.lon;
+          r.latitudDMS = decimalADMS(p.lat, true); r.longitudDMS = decimalADMS(p.lon, false);
+          r.origenUbicacion = "pdf";
+          completarDesdeCoordenadas(r);
+        }
+        if (!r.municipio) {
+          const m = enTexto[0] || MUN_POR_NOMBRE[norm(d.municipioTexto)];
+          if (m) { r.municipio = m.n; r.subregion = m.s; r.municipioAuto = true; }
+        }
+        const falta = [!r.fecha && "la fecha", !tieneCoord(r) && "las coordenadas", !r.tipoAfectacion && "el tipo de afectación"].filter(Boolean);
+        const otroMun = tieneCoord(r) && enTexto.length && !enTexto.some((m) => m.n === r.municipio)
+          ? `El acta menciona ${enTexto.map((m) => m.n).join(" / ")} y las coordenadas caen en ${r.municipio || "otro municipio"}. Revisa el municipio.` : "";
+        r.estado = falta.length ? "revisar" : "listo";
+        r.mensaje = falta.length ? "No se encontró en el PDF " + falta.join(", ") + ". Complétalo a mano." : otroMun;
+        nuevos.push(r);
+      }
+      items.unshift(...nuevos); // Tramo 1 queda primero
+      render();
+      aviso(`${f.name}: ${d.puntos.length ? d.puntos.length + " punto(s) encontrados" : "sin coordenadas"}. Revisa los datos y toca «Guardar datos».`);
+    }
+  }
+
   /* ======================= Tarjetas ======================= */
-  const ETIQUETAS = { leyendo: "Leyendo foto…", listo: "Listo", revisar: "Revisar", guardando: "Guardando…", guardado: "Guardado", error: "Error al guardar", manual: "Carga manual" };
+  const ETIQUETAS = { leyendo: "Leyendo…", listo: "Listo", revisar: "Revisar", guardando: "Guardando…", guardado: "Guardado", error: "Error al guardar", manual: "Carga manual" };
 
   function tarjeta(r) {
-    const esFoto = r.origen === "foto";
+    const esFoto = r.origen === "foto", esPdf = r.origen === "pdf", conImagen = !!r.miniatura;
     const bloqueado = r.estado === "guardado" || r.estado === "guardando" || r.estado === "leyendo";
-    const cls = ["card", esFoto ? "" : "is-manual", r.estado === "guardado" ? "is-guardado" : "", r.estadoPunto === "Crítico" ? "is-critico" : ""].join(" ");
-    const etiqueta = r.estado === "listo" && !esFoto ? "Carga manual" : ETIQUETAS[r.estado];
+    const cls = ["card", conImagen ? "" : "is-manual", r.estado === "guardado" ? "is-guardado" : "", r.estadoPunto === "Crítico" ? "is-critico" : ""].join(" ");
+    const etiqueta = r.estado === "listo" && !esFoto && !esPdf ? "Carga manual" : (r.estado === "listo" && esPdf ? "Listo · PDF" : ETIQUETAS[r.estado]);
+    const nombre = esFoto ? r.nombreArchivo : esPdf ? r.nombreArchivo + (r.punto ? " · " + r.punto : "") : "Registro sin foto";
     return `<article class="${cls}" data-id="${r.id}">
-      ${esFoto ? `<button type="button" class="card__foto" data-act="ver" aria-label="Ver foto completa"><img src="${r.miniatura}" alt="Foto ${esc(r.nombreArchivo)}"><span>Ampliar</span></button>` : ""}
+      ${conImagen ? `<button type="button" class="card__foto" data-act="ver" aria-label="${esPdf ? "Ver página del PDF" : "Ver foto completa"}"><img src="${r.miniatura}" alt="${esPdf ? "Página" : "Foto"} ${esc(r.nombreArchivo)}"><span>Ampliar</span></button>` : ""}
       <div class="card__cuerpo">
-        <div class="card__top"><span class="card__nombre">${esc(esFoto ? r.nombreArchivo : "Registro sin foto")}${r.idRegistro ? " · " + esc(r.idRegistro) : ""}</span><span class="chip chip--${r.estado === "listo" && !esFoto ? "manual" : r.estado}">${etiqueta}</span></div>
+        <div class="card__top"><span class="card__nombre">${esc(nombre)}${r.idRegistro ? " · " + esc(r.idRegistro) : ""}</span><span class="chip chip--${r.estado === "listo" && !esFoto && !esPdf ? "manual" : r.estado}">${etiqueta}</span></div>
         ${r.mensaje ? `<div class="alerta">${esc(r.mensaje)}</div>` : ""}
         <fieldset style="border:0;padding:0;margin:0;display:grid;gap:12px;min-width:0"${bloqueado ? " disabled" : ""}>${campos(r, "c" + r.id + "-")}</fieldset>
         <div class="actions">
@@ -344,7 +431,7 @@
 
   function render() {
     $("#tarjetas").innerHTML = items.length ? items.map(tarjeta).join("")
-      : '<p class="vacio">Aún no hay registros. Agrega uno con la carga manual o sube fotos.</p>';
+      : '<p class="vacio">Aún no hay registros. Agrega uno con la carga manual, sube fotos o un acta en PDF.</p>';
     contadores();
   }
   function actualizar(r) {
@@ -376,7 +463,7 @@
     const r = buscar(b); if (!r) return;
     if (b.dataset.act === "quitar") { items = items.filter((x) => x !== r); render(); if (!HAY_BACKEND) { try { escribirLocal(); } catch (_) {} } }
     if (b.dataset.act === "releer") { cola.push(r); r.estado = "leyendo"; actualizar(r); procesarCola(); }
-    if (b.dataset.act === "ver") abrirVisor(r.dataUrl || r.miniatura, r.nombreArchivo);
+    if (b.dataset.act === "ver") abrirVisor(r.dataUrl || r.miniatura, r.nombreArchivo + (r.punto ? " · " + r.punto + (r.pagina ? " (página " + r.pagina + ")" : "") : ""));
   });
 
   /* ======================= Visor ======================= */
@@ -428,14 +515,16 @@
     let ok = 0, mal = 0;
     for (const r of lista) {
       r.estado = "guardando"; actualizar(r);
+      const pdf = r.pdf; // los puntos de un mismo PDF comparten un solo archivo en Drive
       const res = await Api.post("subir", {
-        base64: r.base64 || "", mimeType: "image/jpeg", nombreArchivo: r.nombreArchivo || "", origen: r.origen,
+        base64: pdf ? (pdf.fileId ? "" : pdf.base64) : (r.base64 || ""), archivoId: pdf && pdf.fileId ? pdf.fileId : "",
+        mimeType: pdf ? "application/pdf" : "image/jpeg", nombreArchivo: r.nombreArchivo || "", origen: r.origen,
         fecha: r.fecha, fechaTexto: r.fechaTexto, latitudDMS: r.latitudDMS, longitudDMS: r.longitudDMS,
         latitud: r.latitud, longitud: r.longitud, codigoVia: r.codigoVia, nombreTramo: r.nombreTramo,
         subregion: r.subregion, municipio: r.municipio, tipoAfectacion: r.tipoAfectacion, responsable: r.responsable,
         estadoPunto: r.estadoPunto, observaciones: r.observaciones, origenUbicacion: r.origenUbicacion, selloLegible: r.selloLegible
       });
-      if (res.status === "success") { r.estado = "guardado"; r.idRegistro = res.id; r.mensaje = ""; ok++; }
+      if (res.status === "success") { r.estado = "guardado"; r.idRegistro = res.id; r.mensaje = ""; ok++; if (pdf && res.fileId) pdf.fileId = res.fileId; }
       else { r.estado = "error"; r.mensaje = res.message || "No se pudo guardar."; mal++; }
       actualizar(r);
     }
@@ -447,7 +536,7 @@
   const CLAVE_LOCAL = "vipc-registros-v1";
   const CAMPOS_LOCALES = ["id", "origen", "estado", "idRegistro", "nombreArchivo", "miniatura", "fecha", "fechaTexto", "latitudDMS", "longitudDMS",
     "latitud", "longitud", "origenUbicacion", "codigoVia", "nombreTramo", "subregion", "municipio", "municipioAuto",
-    "tipoAfectacion", "responsable", "estadoPunto", "observaciones", "selloLegible"];
+    "tipoAfectacion", "responsable", "estadoPunto", "observaciones", "selloLegible", "punto", "pagina"];
   function escribirLocal() {
     const datos = items.filter((r) => r.estado === "guardado").map((r) => Object.fromEntries(CAMPOS_LOCALES.map((k) => [k, r[k]])));
     localStorage.setItem(CLAVE_LOCAL, JSON.stringify(datos));
@@ -498,6 +587,11 @@
   ["dragenter", "dragover"].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add("is-over"); }));
   ["dragleave", "drop"].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.remove("is-over"); }));
   drop.addEventListener("drop", (e) => { if (e.dataTransfer?.files?.length) agregarFotos([...e.dataTransfer.files]); });
+  const dropPdf = $("#pdfs");
+  $("#archivos-pdf").addEventListener("change", (e) => { agregarPDF([...e.target.files]); e.target.value = ""; });
+  ["dragenter", "dragover"].forEach((t) => dropPdf.addEventListener(t, (e) => { e.preventDefault(); dropPdf.classList.add("is-over"); }));
+  ["dragleave", "drop"].forEach((t) => dropPdf.addEventListener(t, (e) => { e.preventDefault(); dropPdf.classList.remove("is-over"); }));
+  dropPdf.addEventListener("drop", (e) => { if (e.dataTransfer?.files?.length) agregarPDF([...e.dataTransfer.files]); });
 
   /* ======================= Acceso (usuario y contraseña) ======================= */
   const Sesion = (function () {
