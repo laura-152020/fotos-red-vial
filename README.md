@@ -42,12 +42,11 @@ backend/appsscript.json          Manifiesto del Apps Script
 | Municipio * | Automático: por coordenadas; si la foto no trae coordenadas, por el nombre escrito en el sello (ej. «Grada el peñol» → El Peñol) |
 | Tipo de afectación * | Lista desplegable. Con el backend conectado, Gemini lo sugiere mirando la foto |
 | Responsable de la visita * | Gobernación · Rental · Alcaldía · Ciudadanía |
-| Estado * | Crítico · No crítico |
 | Observaciones | Texto libre (sin relleno automático) |
 
 \* Obligatorio. Además se exige el **código de la vía o el nombre del tramo**, al menos uno de los dos.
 
-Las listas (tipos de afectación, responsables y estados) están al inicio de `js/app.js`. Si cambias responsables o estados, cámbialos también al inicio de `backend/Code.gs`.
+Las listas (tipos de afectación y responsables) están al inicio de `js/app.js`. Si cambias tipos de afectación o responsables, cámbialos también al inicio de `backend/Code.gs`.
 
 ## Acceso con usuario y contraseña
 

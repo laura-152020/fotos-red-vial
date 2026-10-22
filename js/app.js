@@ -7,7 +7,7 @@
 
   /* ======================= Catálogos ======================= */
   const TIPOS_AFECTACION = [
-    "Derrumbe", "Deslizamiento / movimiento en masa", "Pérdida de banca", "Hundimiento de la vía",
+    "Deslizamiento / movimiento en masa", "Pérdida de banca", "Hundimiento de la vía",
     "Socavación", "Caída de rocas", "Obstrucción de drenaje o alcantarilla", "Daño en puente o pontón",
     "Daño en muro de contención", "Deterioro de la calzada (baches)", "Inundación", "Árbol caído", "Otro"
   ];
@@ -116,10 +116,9 @@
         <label for="${p}sr"><span>Subregión ${r.municipioAuto ? '<span class="auto">· automática</span>' : ""}</span><select id="${p}sr" data-k="subregion">${opciones(SUBREGIONES, r.subregion)}</select></label>
         <label for="${p}mu"><span>Municipio <em>*</em> ${r.municipioAuto ? '<span class="auto">· automático</span>' : ""}</span><input id="${p}mu" data-k="municipio" value="${esc(r.municipio)}" list="lista-municipios" placeholder="Escribe el municipio" autocomplete="off" autocapitalize="words"></label>
       </div>
-      <div class="grid">
+      <div class="grid grid--2">
         <label for="${p}ta"><span>Tipo de afectación <em>*</em></span><select id="${p}ta" data-k="tipoAfectacion">${opciones(TIPOS_AFECTACION, r.tipoAfectacion)}</select></label>
         <label for="${p}re"><span>Responsable de la visita <em>*</em></span><select id="${p}re" data-k="responsable">${opciones(RESPONSABLES, r.responsable)}</select></label>
-        <label for="${p}es"><span>Estado <em>*</em></span><select id="${p}es" class="sel-estado" data-v="${esc(r.estadoPunto)}" data-k="estadoPunto">${opciones(ESTADOS, r.estadoPunto)}</select></label>
       </div>
       <label for="${p}ob"><span>Observaciones</span><textarea id="${p}ob" data-k="observaciones">${esc(r.observaciones)}</textarea></label>`;
   }
@@ -157,7 +156,6 @@
     if (!String(r.municipio).trim()) f.push("municipio");
     if (!r.tipoAfectacion) f.push("tipoAfectacion");
     if (!r.responsable) f.push("responsable");
-    if (!r.estadoPunto) f.push("estadoPunto");
     if (!String(r.codigoVia).trim() && !String(r.nombreTramo).trim()) f.push("codigoVia", "nombreTramo");
     return f;
   }
