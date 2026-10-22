@@ -552,6 +552,7 @@
     const r = await Api.post("login", { usuario, clave });
     b.disabled = false; b.textContent = "Ingresar";
     if (r.status === "verificar") { pedirCodigo(r.usuario, r.correo, r.message); return; }
+    if (r.status === "codigo") { $("#acc-clave").value = ""; pedirCodigo(r.usuario, r.correo, "", "ingreso"); return; }
     if (r.status !== "success") { $("#acc-msg").textContent = r.message || "No se pudo iniciar sesión."; $("#acc-clave").select(); return; }
     Sesion.guardar({ sesion: r.sesion, usuario: r.usuario, nombre: r.nombre, rol: r.rol, expira: r.expira });
     $("#acc-clave").value = "";
@@ -559,9 +560,11 @@
   });
 
   /* ---------- Crear cuenta y verificar correo ---------- */
-  let usuarioPorVerificar = "";
-  function pedirCodigo(usuario, correo, msg) {
-    usuarioPorVerificar = usuario;
+  let usuarioPorVerificar = "", modoCodigo = "registro"; // "registro": confirmar correo · "ingreso": código de cada ingreso
+  function pedirCodigo(usuario, correo, msg, modo) {
+    usuarioPorVerificar = usuario; modoCodigo = modo || "registro";
+    $("#ver-titulo").textContent = modoCodigo === "ingreso" ? "Código de ingreso" : "Confirma tu correo";
+    $("#ver-enviar").textContent = modoCodigo === "ingreso" ? "Ingresar" : "Confirmar";
     $("#ver-texto").textContent = `Te enviamos un código de 6 dígitos a ${correo || "tu correo"}. Revisa también la carpeta de spam.`;
     $("#ver-msg").textContent = msg && !/enviamos/i.test(msg) ? msg : ""; $("#ver-msg").className = "acceso__msg";
     $("#ver-codigo").value = "";
@@ -602,9 +605,19 @@
     const codigo = $("#ver-codigo").value.replace(/\D/g, "");
     const msg = $("#ver-msg"); msg.className = "acceso__msg";
     if (codigo.length !== 6) { msg.textContent = "Escribe los 6 dígitos del código."; return; }
-    const b = $("#ver-enviar"); b.disabled = true; b.textContent = "Verificando…";
+    const b = $("#ver-enviar"); const etiqueta = b.textContent; b.disabled = true; b.textContent = "Verificando…";
+    if (modoCodigo === "ingreso") {
+      const r = await Api.post("ingresoCodigo", { usuario: usuarioPorVerificar, codigo });
+      b.disabled = false; b.textContent = etiqueta;
+      if (r.status === "success") {
+        Sesion.guardar({ sesion: r.sesion, usuario: r.usuario, nombre: r.nombre, rol: r.rol, expira: r.expira });
+        mostrarApp(); return;
+      }
+      if (r.vencido) { mostrarAcceso(r.message); $("#acc-usuario").value = usuarioPorVerificar; return; }
+      msg.textContent = r.message || "No se pudo verificar."; return;
+    }
     const r = await Api.post("verificar", { usuario: usuarioPorVerificar, codigo });
-    b.disabled = false; b.textContent = "Confirmar";
+    b.disabled = false; b.textContent = etiqueta;
     if (r.status === "pendiente_supervisor" || r.status === "pendiente") {
       $("#pendiente-texto").textContent = r.message; verAcceso("pendiente"); return;
     }
@@ -616,7 +629,7 @@
   });
   $("#ver-reenviar").addEventListener("click", async () => {
     const msg = $("#ver-msg");
-    const r = await Api.post("reenviar", { usuario: usuarioPorVerificar });
+    const r = await Api.post(modoCodigo === "ingreso" ? "reenviarIngreso" : "reenviar", { usuario: usuarioPorVerificar });
     msg.className = "acceso__msg" + (r.status === "success" ? " is-ok" : "");
     msg.textContent = r.message || "";
   });

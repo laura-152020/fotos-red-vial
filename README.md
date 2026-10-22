@@ -72,13 +72,17 @@ La página abre con una pantalla de **Ingreso**. Solo entran las personas regist
 |---|---|
 | `@antioquia.gov.co` | Código al correo → entra. |
 | Empresa ya autorizada y vigente | Código al correo → entra. |
-| Empresa nueva | La persona escribe el correo de **su supervisor en la Gobernación**. Tras confirmar su código, al supervisor le llega un correo con 3 botones: **Aprobar a esta persona**, **Aprobar a toda la empresa (12 meses)** o **Rechazar**. Un clic y listo; la persona recibe un correo con la respuesta. |
+| Empresa nueva | La persona escribe el correo de **su supervisor en la Gobernación**. Tras confirmar su código, al supervisor le llega un correo donde elige con un clic **a quién** (solo esa persona o toda la empresa) y **por cuánto tiempo** (1 día, 30 días o 12 meses), o **Rechazar**. La persona recibe un correo con la respuesta y la fecha de vencimiento. |
 | Correo personal (gmail, hotmail, outlook…) | **Rechazado** siempre. |
 
-- «Toda la empresa» agrega su dominio a la hoja `EmpresasAutorizadas` con fecha **Vence** (+12 meses) y **AutorizadaPor**; sus demás empleados entran solos con código, y las solicitudes pendientes de esa empresa quedan aprobadas.
+- «Solo esta persona» guarda su fecha en la columna **Vence** de `Usuarios`; al vencer, al supervisor le llegan botones para renovar (1 día, 30 días, 12 meses).
+- «Toda la empresa» agrega su dominio a la hoja `EmpresasAutorizadas` con la fecha **Vence** elegida y **AutorizadaPor**; sus demás empleados entran solos con código, y las solicitudes pendientes de esa empresa quedan aprobadas.
 - Al vencer, sus usuarios no pueden entrar y al supervisor le llega un botón **Renovar** (máximo un correo al día por empresa).
 - Los botones del correo funcionan 7 días y están firmados: no se pueden falsificar ni reutilizar para otra persona.
 - La hoja `EmpresasAutorizadas` se llena sola; solo la tocas si quieres corregir algo (por ejemplo, `NO` en Activo corta el acceso de una empresa al instante).
+- **Duración de la autorización de una empresa:** propiedad `DURACION_EMPRESA` (`12 meses` por defecto; acepta `90 dias`, `1 hora`, `30 minutos`). Con minutos u horas, el vencimiento es a la hora exacta. Usa tiempos cortos solo para probar.
+- **Código en cada ingreso (verificación en dos pasos):** activado por defecto. Al ingresar con usuario y contraseña llega un código de 6 dígitos al correo (vence en 10 minutos). Las cuentas creadas a mano sin correo entran solo con contraseña. Para desactivarlo: propiedad `CODIGO_EN_CADA_INGRESO = NO`.
+- **Modo prueba:** propiedad `MODO_PRUEBA = SI` permite probar con un solo Gmail: `tucorreo+gob@gmail.com` = Gobernación; `tucorreo+empnorte1@gmail.com` = empleado de la empresa «empnorte». Bórrala al terminar.
 - Propiedad recomendada: `WEBAPP_URL` = la URL `/exec` del Apps Script (asegura que los botones del correo apunten bien).
 - Cuota de Google: una cuenta Gmail gratuita envía hasta ~100 correos al día (cada registro usa 1–3). Con Google Workspace el límite es mucho mayor.
 
