@@ -4,7 +4,7 @@ Gobernación de Antioquia. Página web para celular y computador que registra lo
 
 1. **Carga manual de datos**, cuando no hay evidencias fotográficas. Se puede usar la ubicación actual del celular.
 2. **Carga fotográfica y relleno automático**: se sube la foto y se leen de su sello la fecha, las coordenadas y la vía.
-3. **Carga desde PDF**: se sube el acta de visita técnica (formato FO-M2-P11-061 u otro con texto) y se crea un registro por cada punto con coordenadas: fecha de la visita, código y nombre de la vía, coordenadas, tipo de afectación y la descripción del tramo en Observaciones. El PDF se guarda una sola vez en Drive y queda enlazado a todos sus puntos. Si el lector del navegador no encuentra coordenadas, fecha o vía, se le pide a Gemini. Los PDF escaneados (solo imagen) no se leen en el navegador.
+3. **Subir PDF · lectura de PDF**: la misma sección de la carga manual, pero los campos se llenan desde el acta de visita técnica: fecha de la visita, código y nombre de la vía, coordenadas, municipio, tipo de afectación y, en Observaciones, un resumen de todo el PDF (redactado por Gemini con el servidor conectado; sin servidor, armado con las frases clave del acta). Si el acta trae varios tramos con coordenadas, se elige cada uno con sus botones y se agrega uno a uno o todos juntos. El PDF se guarda una sola vez en Drive y queda enlazado a todos sus registros.
 
 En los dos casos, el municipio se deduce de las coordenadas y la subregión del municipio.
 

@@ -5,15 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>VIP-C · Visor interactivo de puntos críticos</title>
   <meta name="description" content="Carga e inventario fotográfico de puntos críticos de la red vial — Gobernación de Antioquia">
-  <link rel="icon" href="img/logo-gobernacion-antioquia.png?v=5.0">
+  <link rel="icon" href="img/logo-gobernacion-antioquia.png?v=5.2">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
-  <link rel="stylesheet" href="css/style.css?v=5.0">
+  <link rel="stylesheet" href="css/style.css?v=5.2">
 </head>
 <body>
   <header class="topbar">
     <div class="topbar__in">
-      <img class="logo" src="img/logo-gobernacion-antioquia-blanco.png?v=5.0" alt="Gobernación de Antioquia · República de Colombia" width="560" height="253">
+      <img class="logo" src="img/logo-gobernacion-antioquia-blanco.png?v=5.2" alt="Gobernación de Antioquia · República de Colombia" width="560" height="253">
       <div class="marca">
         <div class="marca__sigla">VIP-C</div>
         <div class="marca__nombre">Visor interactivo de puntos críticos</div>
@@ -91,7 +91,7 @@
       <ol class="modos">
         <li><a href="#manual"><b>Carga manual de datos</b></a> <span>si no tienes evidencias fotográficas.</span></li>
         <li><a href="#fotos"><b>Carga fotográfica</b></a> <span>sube una foto y la información se llena automáticamente.</span></li>
-        <li><a href="#pdfs"><b>Carga desde PDF</b></a> <span>sube el acta de visita técnica y la información se llena automáticamente.</span></li>
+        <li><a href="#pdfs"><b>Subir PDF</b></a> <span>sube el acta de visita técnica: se llenan los campos y un resumen de todo el documento.</span></li>
       </ol>
     </section>
 
@@ -118,13 +118,28 @@
       <input id="archivos" type="file" accept="image/jpeg,image/png,image/webp" multiple>
     </label>
 
-    <!-- 3. CARGA DESDE PDF -->
-    <label class="drop drop--pdf" id="pdfs" for="archivos-pdf">
-      <span class="drop__icon" aria-hidden="true"></span>
-      <strong><span class="num">3</span> Carga desde PDF y relleno automático</strong>
-      <small>Toca para elegir en el celular o arrastra aquí en el computador · PDF hasta 20 MB.<br>Del acta de visita técnica se leen la fecha, la vía, el código, las coordenadas de cada tramo, el tipo de afectación y la descripción.</small>
-      <input id="archivos-pdf" type="file" accept="application/pdf,.pdf" multiple>
-    </label>
+    <!-- 3. SUBIR PDF · LECTURA DE PDF -->
+    <section class="panel" id="pdfs" aria-labelledby="h-pdf">
+      <div class="panel__head">
+        <h2 id="h-pdf"><span class="num">3</span> Subir PDF · lectura de PDF</h2>
+        <span class="hint">Acta de visita técnica</span>
+      </div>
+      <div class="pdf-carga">
+        <label class="btn" for="archivos-pdf">Elegir PDF</label>
+        <input id="archivos-pdf" class="oculto" type="file" accept="application/pdf,.pdf">
+        <span id="p-archivo" class="hint">Ningún archivo seleccionado</span>
+        <span id="p-ia" class="hint" hidden>· Gemini está redactando el resumen…</span>
+      </div>
+      <div id="p-tramos" class="tramos" hidden></div>
+      <div id="form-pdf" class="campos"></div>
+      <div class="actions">
+        <button id="p-agregar" type="button" class="btn btn--primary">Agregar a la lista</button>
+        <button id="p-todos" type="button" class="btn" hidden>Agregar todos los tramos</button>
+        <button id="p-ver" type="button" class="btn" hidden>Ver página del PDF</button>
+        <button id="p-limpiar" type="button" class="btn btn--ghost">Limpiar</button>
+        <span id="p-msg" class="hint" role="status"></span>
+      </div>
+    </section>
 
     <div id="aviso" class="aviso" role="status" hidden></div>
 
@@ -154,10 +169,10 @@
 
   <script src="https://cdn.jsdelivr.net/npm/exifr@7.1.3/dist/lite.umd.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@6.0.1/dist/tesseract.min.js"></script>
-  <script src="js/config.js?v=5.0"></script>
-  <script src="js/municipios.js?v=5.0"></script>
-  <script src="js/ocr.js?v=5.0"></script>
-  <script src="js/lectorpdf.js?v=5.0"></script>
-  <script src="js/app.js?v=5.0"></script>
+  <script src="js/config.js?v=5.2"></script>
+  <script src="js/municipios.js?v=5.2"></script>
+  <script src="js/ocr.js?v=5.2"></script>
+  <script src="js/lectorpdf.js?v=5.2"></script>
+  <script src="js/app.js?v=5.2"></script>
 </body>
 </html>

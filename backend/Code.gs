@@ -82,7 +82,7 @@ const ANTIOQUIA = { latMin: 5.40, latMax: 8.90, lonMin: -77.15, lonMax: -73.85 }
 
 function doGet(e) {
   const p = (e && e.parameter) || {};
-  if (!p.accion) return json_({ status: "online", servicio: "VIP-C", version: "5.1.0" });
+  if (!p.accion) return json_({ status: "online", servicio: "VIP-C", version: "5.2.0" });
   if (p.accion === "decidir") return decidir_(p.t);
   try {
     // Exportación (ArcGIS): con la clave de administrador o con una sesión válida
@@ -858,7 +858,7 @@ function leerSello_(payload) {
 }
 
 /* ======================= Lectura de actas en PDF (Gemini) ======================= */
-// Se usa solo cuando el lector del navegador no encuentra coordenadas, fecha o vía en el PDF.
+// Redacta el resumen de todo el acta y completa lo que el lector del navegador no encontró.
 function leerPdf_(payload) {
   if (!payload.base64) throw new Error("No llegó el PDF.");
   const key = prop_("GEMINI_API_KEY");
@@ -874,7 +874,9 @@ function leerPdf_(payload) {
     "puntos (lista: un elemento por cada sitio con coordenadas distintas, con las claves " +
     "nombre (ej \"Tramo 1\"), latitud (tal cual, ej N 6°22'10\"), longitud (tal cual, ej W 75°42'28\"), " +
     "tipo_afectacion (exactamente uno de: " + TIPOS_AFECTACION.join(" | ") + "), " +
-    "descripcion (lo encontrado y lo recomendado en ese sitio, máximo 3 frases), pagina (número de página donde se describe)).";
+    "descripcion (lo encontrado y lo recomendado en ese sitio, máximo 3 frases), pagina (número de página donde se describe)), " +
+    "resumen (resumen de TODO el documento en 4 a 6 frases claras: motivo de la visita, qué se encontró en cada tramo con sus medidas, " +
+    "el riesgo para la vía y las recomendaciones; sin repetir coordenadas ni datos del encabezado del formato).";
   const body = {
     contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: "application/pdf", data: payload.base64 } }] }],
     generationConfig: { responseMimeType: "application/json", temperature: 0 }
@@ -910,6 +912,7 @@ function leerPdf_(payload) {
     codigoVia: String(d.codigo_via || "").toUpperCase().replace(/\s/g, ""),
     via: String(d.via || "").replace(/^\s*v[ií]a\s*/i, ""),
     municipio: String(d.municipio || ""),
+    resumen: String(d.resumen || "").trim(),
     puntos: puntos
   };
 }

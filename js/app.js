@@ -334,77 +334,137 @@
     return m[1].split(/\s*(?:\/|,|;|\sy\s|\s-\s)\s*/).map((x) => MUN_POR_NOMBRE[norm(x)]).filter(Boolean);
   }
 
-  async function agregarPDF(files) {
-    const maxMB = 20;
-    for (const f of files) {
-      if (f.type !== "application/pdf" && !/\.pdf$/i.test(f.name)) { aviso(f.name + " no es un PDF.", true); continue; }
-      if (f.size > maxMB * 1048576) { aviso(f.name + " supera " + maxMB + " MB.", true); continue; }
-      aviso("Leyendo " + f.name + "…");
-      let bytes, lectura, d;
-      try {
-        bytes = new Uint8Array(await f.arrayBuffer());
-        lectura = await LectorPDF.abrir(bytes.slice());
-        d = LectorPDF.interpretar(lectura.paginas);
-      } catch (e) { aviso("No se pudo leer " + f.name + ": " + (e.message || "PDF dañado o protegido") + ".", true); continue; }
-      const base64 = aBase64(bytes);
+  // Sección 3: igual a la carga manual, pero los campos se llenan desde el PDF.
+  // Un acta puede traer varios tramos (uno por coordenada): se elige cada uno con los botones de tramo.
+  const formPdf = $("#form-pdf");
+  let pdfActual = null;           // { nombre, base64, fileId, doc, d }
+  let tramosPdf = [];             // un registro por tramo
+  let selPdf = 0;
+  let vacioPdf = nuevoRegistro({ origen: "pdf" });
+  const regPdf = () => tramosPdf[selPdf] || vacioPdf;
 
-      // Si al lector del navegador le faltan datos, se le pide a Gemini (con el servidor conectado)
-      if (HAY_BACKEND && (!d.puntos.length || !d.fecha || (!d.codigoVia && !d.via))) {
-        aviso("Leyendo " + f.name + " con Gemini…");
-        const g = await Api.post("leerPdf", { base64 });
-        if (g.status === "success") {
-          d.fecha = d.fecha || g.fecha || ""; d.codigoVia = d.codigoVia || g.codigoVia || ""; d.via = d.via || g.via || "";
-          d.municipioTexto = g.municipio || "";
-          if (!d.puntos.length && Array.isArray(g.puntos)) {
-            d.puntos = g.puntos.filter((p) => p.latitud != null && p.longitud != null)
-              .map((p, k) => ({ lat: p.latitud, lon: p.longitud, nombre: p.nombre || "Punto " + (k + 1), tipo: p.tipoAfectacion || "", descripcion: p.descripcion || "", pagina: p.pagina || 1 }));
-          }
-        }
-      }
-      if (!lectura.paginas.join("").trim()) { aviso(f.name + " no tiene texto (parece escaneado). Completa los datos a mano.", true); }
-
-      const pdf = { base64, fileId: null };
-      const enTexto = municipiosDelTexto(d.texto);
-      const responsable = d.esGobernacion ? "Gobernación" : (manual.responsable || "");
-      const puntos = d.puntos.length ? d.puntos : [{ lat: null, lon: null, nombre: "", tipo: d.tipoGeneral, descripcion: "", pagina: 1 }];
-      const imagenes = {}, nuevos = [];
-      for (const p of puntos) {
-        const pag = Math.min(Math.max(1, p.pagina || 1), lectura.doc.numPages);
-        if (!imagenes[pag]) {
-          try {
-            const grande = await LectorPDF.dibujarPagina(lectura.doc, pag, 1100);
-            imagenes[pag] = { grande, mini: await LectorPDF.dibujarPagina(lectura.doc, pag, 360) };
-          } catch (_) { imagenes[pag] = { grande: "", mini: "" }; }
-        }
-        const r = nuevoRegistro({
-          origen: "pdf", estado: "listo", nombreArchivo: f.name, punto: p.nombre, pagina: pag, pdf,
-          dataUrl: imagenes[pag].grande, miniatura: imagenes[pag].mini,
-          fecha: d.fecha || "", fechaTexto: d.fechaTexto || "", codigoVia: d.codigoVia || "", nombreTramo: d.via || "",
-          tipoAfectacion: TIPOS_AFECTACION.includes(p.tipo) ? p.tipo : "", responsable,
-          observaciones: p.descripcion || ""
-        });
-        if (p.lat != null && p.lon != null) {
-          r.latitud = p.lat; r.longitud = p.lon;
-          r.latitudDMS = decimalADMS(p.lat, true); r.longitudDMS = decimalADMS(p.lon, false);
-          r.origenUbicacion = "pdf";
-          completarDesdeCoordenadas(r);
-        }
-        if (!r.municipio) {
-          const m = enTexto[0] || MUN_POR_NOMBRE[norm(d.municipioTexto)];
-          if (m) { r.municipio = m.n; r.subregion = m.s; r.municipioAuto = true; }
-        }
-        const falta = [!r.fecha && "la fecha", !tieneCoord(r) && "las coordenadas", !r.tipoAfectacion && "el tipo de afectación"].filter(Boolean);
-        const otroMun = tieneCoord(r) && enTexto.length && !enTexto.some((m) => m.n === r.municipio)
-          ? `El acta menciona ${enTexto.map((m) => m.n).join(" / ")} y las coordenadas caen en ${r.municipio || "otro municipio"}. Revisa el municipio.` : "";
-        r.estado = falta.length ? "revisar" : "listo";
-        r.mensaje = falta.length ? "No se encontró en el PDF " + falta.join(", ") + ". Complétalo a mano." : otroMun;
-        nuevos.push(r);
-      }
-      items.unshift(...nuevos); // Tramo 1 queda primero
-      render();
-      aviso(`${f.name}: ${d.puntos.length ? d.puntos.length + " punto(s) encontrados" : "sin coordenadas"}. Revisa los datos y toca «Guardar datos».`);
-    }
+  function msgPdf(t, error) { const m = $("#p-msg"); m.textContent = t || ""; m.style.color = error ? "var(--err)" : ""; }
+  function pintarPdf() {
+    const r = regPdf();
+    formPdf.innerHTML = (r.mensaje ? `<div class="alerta">${esc(r.mensaje)}</div>` : "") + campos(r, "p-");
+    const t = $("#p-tramos");
+    t.hidden = tramosPdf.length < 2;
+    t.innerHTML = tramosPdf.map((x, i) => `<button type="button" class="tramo${i === selPdf ? " is-sel" : ""}${x.agregado ? " is-ok" : ""}" data-i="${i}"${x.agregado ? " disabled" : ""}>${x.agregado ? "✓ " : ""}${esc(x.punto)}</button>`).join("");
+    const quedan = tramosPdf.filter((x) => !x.agregado).length;
+    $("#p-todos").hidden = quedan < 2;
+    $("#p-todos").textContent = `Agregar los ${quedan} tramos`;
+    $("#p-ver").hidden = !r.dataUrl;
   }
+  formPdf.addEventListener("input", (e) => alEditar(regPdf(), e.target, formPdf, pintarPdf));
+  formPdf.addEventListener("change", (e) => alCambiar(regPdf(), e.target, pintarPdf));
+  $("#p-tramos").addEventListener("click", (e) => { const b = e.target.closest("[data-i]"); if (!b) return; selPdf = Number(b.dataset.i); pintarPdf(); });
+  $("#p-ver").addEventListener("click", () => { const r = regPdf(); abrirVisor(r.dataUrl, r.nombreArchivo + " · " + r.punto + " (página " + r.pagina + ")"); });
+
+  function limpiarPdf() { pdfActual = null; tramosPdf = []; selPdf = 0; vacioPdf = nuevoRegistro({ origen: "pdf" }); $("#p-archivo").textContent = "Ningún archivo seleccionado"; pintarPdf(); msgPdf(""); }
+  $("#p-limpiar").addEventListener("click", limpiarPdf);
+
+  function pasarALista(lista) {
+    lista.forEach((r) => { r.agregado = true; items.unshift(Object.assign({}, r, { estado: "listo", mensaje: "" })); });
+    render();
+    const sig = tramosPdf.findIndex((x) => !x.agregado);
+    if (sig < 0) { limpiarPdf(); msgPdf(lista.length > 1 ? `${lista.length} tramos agregados a la lista.` : "Registro agregado a la lista."); }
+    else { selPdf = sig; pintarPdf(); msgPdf(`${lista.map((x) => x.punto).join(", ")} agregado. Sigue con ${tramosPdf[sig].punto}.`); }
+  }
+  $("#p-agregar").addEventListener("click", () => {
+    if (!pdfActual) { msgPdf("Primero elige un PDF.", true); return; }
+    const r = regPdf(), f = faltantes(r);
+    if (f.length) { marcar(formPdf, f); msgPdf("Falta: " + textoFaltantes(f) + ".", true); return; }
+    pasarALista([r]);
+  });
+  $("#p-todos").addEventListener("click", () => {
+    const quedan = tramosPdf.filter((x) => !x.agregado);
+    const malo = quedan.find((x) => faltantes(x).length);
+    if (malo) { selPdf = tramosPdf.indexOf(malo); pintarPdf(); const f = faltantes(malo); marcar(formPdf, f); msgPdf(`${malo.punto}: falta ${textoFaltantes(f)}.`, true); return; }
+    pasarALista(quedan);
+  });
+
+  async function cargarPDF(f) {
+    if (!f) return;
+    if (f.type !== "application/pdf" && !/\.pdf$/i.test(f.name)) { msgPdf(f.name + " no es un PDF.", true); return; }
+    if (f.size > 20 * 1048576) { msgPdf(f.name + " supera 20 MB.", true); return; }
+    $("#p-archivo").textContent = f.name;
+    msgPdf("Leyendo el PDF…");
+    let bytes, lectura, d;
+    try {
+      bytes = new Uint8Array(await f.arrayBuffer());
+      lectura = await LectorPDF.abrir(bytes.slice());
+      d = LectorPDF.interpretar(lectura.paginas);
+    } catch (e) { msgPdf("No se pudo leer " + f.name + ": " + (e.message || "PDF dañado o protegido") + ".", true); return; }
+    const sinTexto = !lectura.paginas.join("").trim();
+    pdfActual = { nombre: f.name, base64: aBase64(bytes), fileId: null, doc: lectura.doc, d };
+    const pdf = pdfActual;
+    await armarTramos(pdf, d);
+    msgPdf(sinTexto ? "El PDF no tiene texto (parece escaneado)." : `${d.puntos.length ? d.puntos.length + " tramo(s) encontrados" : "No se encontraron coordenadas"}. Revisa los datos y toca «Agregar a la lista».`, sinTexto);
+
+    // Con el servidor: Gemini redacta el resumen de todo el acta y completa lo que falte
+    if (!HAY_BACKEND) return;
+    $("#p-ia").hidden = false;
+    const g = await Api.post("leerPdf", { base64: pdf.base64 });
+    $("#p-ia").hidden = true;
+    if (pdfActual !== pdf || g.status !== "success") return;
+    const habiaPuntos = d.puntos.length;
+    d.fecha = d.fecha || g.fecha || ""; d.codigoVia = d.codigoVia || g.codigoVia || ""; d.via = d.via || g.via || ""; d.municipioTexto = g.municipio || "";
+    if (!habiaPuntos && Array.isArray(g.puntos)) {
+      d.puntos = g.puntos.filter((p) => p.latitud != null && p.longitud != null)
+        .map((p, k) => ({ lat: p.latitud, lon: p.longitud, nombre: p.nombre || "Punto " + (k + 1), tipo: p.tipoAfectacion || "", descripcion: p.descripcion || "", pagina: p.pagina || 1 }));
+    }
+    const resumenAnterior = d.resumen;
+    if (g.resumen) d.resumen = g.resumen;
+    if (!habiaPuntos && d.puntos.length) { await armarTramos(pdf, d); }
+    else tramosPdf.forEach((r) => {
+      if (!r.agregado && (!r.observaciones || r.observaciones === resumenAnterior)) r.observaciones = d.resumen;
+      if (!r.fecha) r.fecha = d.fecha; if (!r.codigoVia) r.codigoVia = d.codigoVia; if (!r.nombreTramo) r.nombreTramo = d.via;
+    });
+    pintarPdf();
+    if (g.resumen) msgPdf("Resumen del acta redactado con Gemini. Revisa los datos y toca «Agregar a la lista».");
+  }
+
+  async function armarTramos(pdf, d) {
+    const enTexto = municipiosDelTexto(d.texto);
+    const responsable = d.esGobernacion ? "Gobernación" : (manual.responsable || "");
+    const puntos = d.puntos.length ? d.puntos : [{ lat: null, lon: null, nombre: "Acta", tipo: d.tipoGeneral, descripcion: "", pagina: 1 }];
+    const imagenes = {};
+    tramosPdf = [];
+    for (const p of puntos) {
+      const pag = Math.min(Math.max(1, p.pagina || 1), pdf.doc.numPages);
+      if (!imagenes[pag]) {
+        try {
+          const grande = await LectorPDF.dibujarPagina(pdf.doc, pag, 1100);
+          imagenes[pag] = { grande, mini: await LectorPDF.dibujarPagina(pdf.doc, pag, 360) };
+        } catch (_) { imagenes[pag] = { grande: "", mini: "" }; }
+      }
+      const r = nuevoRegistro({
+        origen: "pdf", estado: "listo", nombreArchivo: pdf.nombre, punto: p.nombre, pagina: pag, pdf,
+        dataUrl: imagenes[pag].grande, miniatura: imagenes[pag].mini,
+        fecha: d.fecha || "", fechaTexto: d.fechaTexto || "", codigoVia: d.codigoVia || "", nombreTramo: d.via || "",
+        tipoAfectacion: TIPOS_AFECTACION.includes(p.tipo) ? p.tipo : "", responsable,
+        observaciones: d.resumen || p.descripcion || ""
+      });
+      if (p.lat != null && p.lon != null) {
+        r.latitud = p.lat; r.longitud = p.lon;
+        r.latitudDMS = decimalADMS(p.lat, true); r.longitudDMS = decimalADMS(p.lon, false);
+        r.origenUbicacion = "pdf";
+        completarDesdeCoordenadas(r);
+      }
+      if (!r.municipio) {
+        const m = enTexto[0] || MUN_POR_NOMBRE[norm(d.municipioTexto)];
+        if (m) { r.municipio = m.n; r.subregion = m.s; r.municipioAuto = true; }
+      }
+      const falta = [!r.fecha && "la fecha", !tieneCoord(r) && "las coordenadas", !r.tipoAfectacion && "el tipo de afectación"].filter(Boolean);
+      const otroMun = tieneCoord(r) && enTexto.length && !enTexto.some((m) => m.n === r.municipio)
+        ? `El acta menciona ${enTexto.map((m) => m.n).join(" / ")} y las coordenadas caen en ${r.municipio || "otro municipio"}. Revisa el municipio.` : "";
+      r.mensaje = falta.length ? "No se encontró en el PDF " + falta.join(", ") + ". Complétalo a mano." : otroMun;
+      tramosPdf.push(r);
+    }
+    selPdf = 0;
+    pintarPdf();
+  }
+  pintarPdf();
 
   /* ======================= Tarjetas ======================= */
   const ETIQUETAS = { leyendo: "Leyendo…", listo: "Listo", revisar: "Revisar", guardando: "Guardando…", guardado: "Guardado", error: "Error al guardar", manual: "Carga manual" };
@@ -587,11 +647,10 @@
   ["dragenter", "dragover"].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add("is-over"); }));
   ["dragleave", "drop"].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.remove("is-over"); }));
   drop.addEventListener("drop", (e) => { if (e.dataTransfer?.files?.length) agregarFotos([...e.dataTransfer.files]); });
-  const dropPdf = $("#pdfs");
-  $("#archivos-pdf").addEventListener("change", (e) => { agregarPDF([...e.target.files]); e.target.value = ""; });
-  ["dragenter", "dragover"].forEach((t) => dropPdf.addEventListener(t, (e) => { e.preventDefault(); dropPdf.classList.add("is-over"); }));
-  ["dragleave", "drop"].forEach((t) => dropPdf.addEventListener(t, (e) => { e.preventDefault(); dropPdf.classList.remove("is-over"); }));
-  dropPdf.addEventListener("drop", (e) => { if (e.dataTransfer?.files?.length) agregarPDF([...e.dataTransfer.files]); });
+  const panelPdf = $("#pdfs");
+  $("#archivos-pdf").addEventListener("change", (e) => { cargarPDF(e.target.files[0]); e.target.value = ""; });
+  ["dragenter", "dragover"].forEach((t) => panelPdf.addEventListener(t, (e) => { if ([...(e.dataTransfer?.types || [])].includes("Files")) { e.preventDefault(); panelPdf.classList.add("is-over"); } }));
+  ["dragleave", "drop"].forEach((t) => panelPdf.addEventListener(t, (e) => { panelPdf.classList.remove("is-over"); if (t === "drop" && e.dataTransfer?.files?.length) { e.preventDefault(); cargarPDF(e.dataTransfer.files[0]); } }));
 
   /* ======================= Acceso (usuario y contraseña) ======================= */
   const Sesion = (function () {

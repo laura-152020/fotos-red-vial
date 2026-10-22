@@ -225,9 +225,39 @@ const LectorPDF = (function () {
       delete p.occ;
     });
 
-    return Object.assign(general, { puntos, texto: plano });
+    const r = Object.assign(general, { puntos, texto: plano });
+    r.resumen = resumir(r);
+    return r;
   }
 
-  return { cargarLib, abrir, dibujarPagina, interpretar, tipoDe };
+
+  /* Resumen de todo el acta (sin servidor): motivo de la visita, lo encontrado y medido en cada tramo
+     y las recomendaciones. Con el servidor conectado, Gemini lo reemplaza por uno redactado. */
+  function frases(t) { return String(t || "").replace(/\s+/g, " ").split(/(?<=[.;])\s+(?=[A-ZÁÉÍÓÚÑ])/).map((x) => x.trim()).filter(Boolean); }
+  const corta = (t, n) => (t.length > n ? t.slice(0, n).replace(/\s+\S*$/, "") + "…" : t);
+  function resumir(d) {
+    const partes = [];
+    const motivo = frases(d.texto).find((f) => /se\s+realiz[oó]\s+(?:una\s+)?visita|tuvo\s+como\s+objeto/i.test(f));
+    if (motivo) {
+      let m = motivo.slice(motivo.search(/se\s+realiz[oó]|la\s+visita\s+tuvo/i));
+      const fin = m.search(/\.\s/); if (fin > 40) m = m.slice(0, fin + 1);
+      partes.push(corta(m, 380));
+    }
+    const recs = [];
+    (d.puntos || []).forEach((p) => {
+      const fs = frases(p.descripcion).filter((f) => !/^(tramo|punto|sitio|pk)\s*\d+\s*[.:]/i.test(f) || /se\s+(evidenci|identific|observ)/i.test(f));
+      const hallazgo = fs.find((f) => /se\s+(evidenci|identific|observ)/i.test(f));
+      const medida = fs.find((f) => /se\s+estima|longitud|ancho\s+efectivo|altura/i.test(f) && f !== hallazgo);
+      const rec = fs.find((f) => /se\s+recomienda|se\s+requiere/i.test(f));
+      const txt = [hallazgo && corta(hallazgo.replace(/^.*?(se\s+(evidenci|identific|observ))/i, (m, a) => a.charAt(0).toUpperCase() + a.slice(1)), 260), medida && corta(medida, 200)].filter(Boolean).join(" ");
+      if (txt) partes.push(p.nombre + ": " + txt);
+      const recT = rec ? rec.slice(Math.max(0, rec.search(/se\s+recomienda|se\s+requiere/i))).replace(/\s*Se recomienda\s+([A-ZÁÉÍÓÚ])/, (m, c) => "Se recomiendan " + c.toLowerCase()) : "";
+      if (recT && !recs.some((r) => r.slice(0, 40) === recT.slice(0, 40))) recs.push(p.nombre + ": " + corta(recT, 240));
+    });
+    if (recs.length) partes.push("Recomendaciones: " + recs.join(" "));
+    return partes.join("\n").slice(0, 2000);
+  }
+
+  return { cargarLib, abrir, dibujarPagina, interpretar, tipoDe, resumir };
 })();
 if (typeof module !== "undefined") module.exports = LectorPDF;
