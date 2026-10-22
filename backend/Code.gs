@@ -1,5 +1,5 @@
 /**
- * VIP-C · Visor interactivo de puntos críticos — Backend v4.6 (Google Apps Script)
+ * VIP-C · Visor interactivo de puntos críticos — Backend v4.7 (Google Apps Script)
  * ----------------------------------------------------------
  * Un solo archivo. Guarda fotos en Drive, lee el sello de la foto con Gemini
  * y registra cada punto (con o sin foto) en Google Sheets. Expone los datos para ArcGIS.
@@ -13,6 +13,7 @@
  *   ADMIN_TOKEN      Clave de administrador: anular registros y exportar a ArcGIS
  *   SESSION_SECRET   Se crea sola la primera vez. Si la cambias o la borras, se cierran todas las sesiones.
  *   DOMINIO_INSTITUCIONAL  Opcional. Por defecto antioquia.gov.co (esos correos se activan con un código)
+ *   MODO_PRUEBA      Opcional. SI = permite probar con un Gmail usando tucorreo+gob@… y tucorreo+empX1@… (borrar al terminar)
  *   ADMIN_EMAIL      Opcional. A dónde llegan los avisos de solicitudes. Por defecto, el dueño del script
  *
  * USUARIOS (hoja "Usuarios" del mismo Sheet; se crea sola)
@@ -77,7 +78,7 @@ const ANTIOQUIA = { latMin: 5.40, latMax: 8.90, lonMin: -77.15, lonMax: -73.85 }
 
 function doGet(e) {
   const p = (e && e.parameter) || {};
-  if (!p.accion) return json_({ status: "online", servicio: "VIP-C", version: "4.6.0" });
+  if (!p.accion) return json_({ status: "online", servicio: "VIP-C", version: "4.7.0" });
   if (p.accion === "decidir") return decidir_(p.t);
   try {
     // Exportación (ArcGIS): con la clave de administrador o con una sesión válida
@@ -253,8 +254,24 @@ function login_(p) {
 
 function dominioInstitucional_() { return (prop_("DOMINIO_INSTITUCIONAL", true) || "antioquia.gov.co").toLowerCase().replace(/^@/, ""); }
 function correoAdmin_() { return prop_("ADMIN_EMAIL", true) || Session.getEffectiveUser().getEmail(); }
+/* ---------- Modo prueba (propiedad MODO_PRUEBA = SI) ----------
+ * Permite probar con un solo Gmail usando direcciones con "+":
+ *   tucorreo+gob@gmail.com       → se trata como correo de la Gobernación
+ *   tucorreo+empnorte1@gmail.com → se trata como empleado de la empresa "empnorte" (empnorte.prueba)
+ *   tucorreo@gmail.com           → correo personal (bloqueado)
+ * Los correos llegan igual a la bandeja de tucorreo@gmail.com. Borra la propiedad al terminar las pruebas. */
+function modoPrueba_() { return String(prop_("MODO_PRUEBA", true) || "").toUpperCase() === "SI"; }
+function efectivo_(correo) {
+  const c = String(correo || "").toLowerCase().trim();
+  if (!modoPrueba_()) return c;
+  const m = c.match(/^([^@+]+)\+(gob|emp[a-z]+)[0-9]*@(gmail\.com|googlemail\.com|outlook\.com|hotmail\.com|live\.com)$/);
+  if (!m) return c;
+  return m[2] === "gob" ? m[1] + "@" + dominioInstitucional_() : m[1] + "@" + m[2] + ".prueba";
+}
+function dominioDe_(correo) { return (efectivo_(correo).split("@")[1] || "").toLowerCase(); }
+
 function terminaEnDominio_(correo, d) {
-  const c = String(correo).toLowerCase(); d = String(d || "").toLowerCase().trim().replace(/^@/, "");
+  const c = efectivo_(correo); d = String(d || "").toLowerCase().trim().replace(/^@/, "");
   return !!d && (c.slice(-(d.length + 1)) === "@" + d || c.slice(-(d.length + 1)) === "." + d); // incluye subdominios
 }
 function esInstitucional_(correo) { return terminaEnDominio_(correo, dominioInstitucional_()); }
@@ -300,7 +317,7 @@ function estadoEmpresa_(correo) {
   let listada = null;
   for (let i = 1; i < vals.length; i++) {
     const dom = texto_(txt[i][iDom]);
-    if (!dom || esPersonal_("x@" + dom.replace(/^@/, "")) || !terminaEnDominio_(correo, dom)) continue;
+    if (!dom || DOMINIOS_PERSONALES.indexOf(dom.replace(/^@/, "").toLowerCase()) >= 0 || !terminaEnDominio_(correo, dom)) continue;
     const activo = ["SI", "SÍ", "S", "X", "1", "TRUE", "VERDADERO"].indexOf(normUsuario_(txt[i][iAct]).toUpperCase()) >= 0;
     const vence = iVen === undefined ? null : fechaVence_(vals[i][iVen], txt[i][iVen]);
     const vigente = activo && (!vence || vence >= hoy); // vigente hasta el final del día de vencimiento
@@ -361,7 +378,7 @@ function registro_(p) {
   const autoactiva = institucional || !!empresaOk;
   const manual = !autoactiva && permiteSolicitudes_(); // modo antiguo: aprueba el administrador
   if (!autoactiva && !manual) {
-    if (!supervisor) return { status: "error", necesitaSupervisor: true, message: "La empresa @" + correo.split("@")[1] + " aún no está autorizada. Escribe el correo de tu supervisor en la Gobernación (@" + dominioInstitucional_() + ") para que apruebe tu acceso." };
+    if (!supervisor) return { status: "error", necesitaSupervisor: true, message: "La empresa @" + dominioDe_(correo) + " aún no está autorizada. Escribe el correo de tu supervisor en la Gobernación (@" + dominioInstitucional_() + ") para que apruebe tu acceso." };
     if (!esInstitucional_(supervisor) || !/^[^\s@]+@[^\s@]+$/.test(supervisor)) return { status: "error", necesitaSupervisor: true, message: "El supervisor debe tener correo @" + dominioInstitucional_() + "." };
   }
   const lock = LockService.getScriptLock();
@@ -398,7 +415,7 @@ function registro_(p) {
 // Para volver a recibir solicitudes de empresas no listadas, crea la propiedad PERMITIR_SOLICITUDES = SI.
 function permiteSolicitudes_() { return String(prop_("PERMITIR_SOLICITUDES", true) || "").toUpperCase() === "SI"; }
 function noAutorizado_(correo) {
-  return { status: "error", bloqueado: true, message: "El correo @" + correo.split("@")[1] + " no está autorizado para VIP-C. Si tu empresa tiene contrato con la Gobernación de Antioquia, pide a tu supervisor que la autorice." };
+  return { status: "error", bloqueado: true, message: "El correo @" + dominioDe_(correo) + " no está autorizado para VIP-C. Si tu empresa tiene contrato con la Gobernación de Antioquia, pide a tu supervisor que la autorice." };
 }
 
 function enviarCodigo_(usuario, correo, nombre) {
@@ -423,7 +440,7 @@ function avisarAdmin_(nombre, correo, entidad, usuario, empresa) {
         "Nombre: " + nombre + "\nCorreo: " + correo + "\nDice ser de: " + entidad + (empresa ? " · " + empresa : "") + "\nUsuario: " + usuario +
         (esPersonal_(correo) ? "\n\n⚠ Es un correo PERSONAL (no institucional ni de empresa). Verifica la identidad antes de aprobar." :
           entidad === "Gobernación de Antioquia" ? "\n\n⚠ Dice ser de la Gobernación pero no usa un correo @" + dominioInstitucional_() + "." :
-          "\n\nLa empresa no está en la hoja «" + HOJA_EMPRESAS + "». Si la autorizas, agrega su dominio (" + correo.split("@")[1] + ") y sus empleados podrán entrar solos con código.") +
+          "\n\nLa empresa no está en la hoja «" + HOJA_EMPRESAS + "». Si la autorizas, agrega su dominio (" + dominioDe_(correo) + ") y sus empleados podrán entrar solos con código.") +
         "\n\nPara aprobar esta solicitud, abre la hoja «Usuarios» y cambia PENDIENTE por SI en la columna Activo. Para rechazarla, escribe NO.\n\n" + url
     });
   } catch (_) { /* si falla el correo, la solicitud igual queda en la hoja */ }
@@ -489,7 +506,7 @@ function boton_(texto, url, color) {
 function esc_(t) { return String(t || "").replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
 
 function pedirAprobacion_(u) {
-  const dom = u.correo.split("@")[1];
+  const dom = dominioDe_(u.correo);
   const base = { u: u.usuario, sup: u.supervisor };
   const html = '<div style="font:15px/1.5 Arial,sans-serif;color:#1b231e;max-width:560px">' +
     '<h2 style="margin:0 0 8px">Solicitud de acceso a VIP-C</h2>' +
@@ -582,7 +599,7 @@ function decidir_(token) {
     u.u.h.getRange(u.fila, col).setValue("SI");
     avisarUsuario_(u, true);
     if (d.d === "empresa") {
-      const dom = u.correo.split("@")[1].toLowerCase();
+      const dom = dominioDe_(u.correo);
       const v = autorizarEmpresa_(dom, u.empresa, d.sup);
       // Activa también a otras personas de la misma empresa que estaban esperando
       const todos = leerUsuarios_(); let otros = 0;
